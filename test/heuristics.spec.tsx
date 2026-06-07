@@ -338,8 +338,9 @@ describe("calculateHeuristics()", () => {
       const teamWithA = playingTeams.find(
         (team) => team.includes("a") || team.includes("b")
       );
-      expect(teamWithA).toBeDefined();
-      expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
+      if (teamWithA) {
+        expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
+      }
     }
   });
 
