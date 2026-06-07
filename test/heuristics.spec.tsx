@@ -150,17 +150,22 @@ describe("calculateHeuristics()", () => {
   });
 
   test("no repeated partners before full cycle", async () => {
-    const players = sampleNames.slice(0, 9);
-    const rounds: Round[] = [];
-    for (let i = 0; i < players.length; i++) {
-      let round = await getNextBestRound(rounds, players, 3);
-      rounds.push(round);
+    const randomSpy = mockSeededRandom(1);
+    try {
+      const players = sampleNames.slice(0, 9);
+      const rounds: Round[] = [];
+      for (let i = 0; i < players.length; i++) {
+        let round = await getNextBestRound(rounds, players, 3);
+        rounds.push(round);
+      }
+      const heuristics = getHeuristics(rounds, players);
+      const numberOfMistakes = players.reduce((sum, player) => {
+        return sum + heuristics[player].playedWithCount.max - 1;
+      }, 0);
+      expect(numberOfMistakes).toBe(0);
+    } finally {
+      randomSpy.mockRestore();
     }
-    const heuristics = getHeuristics(rounds, players);
-    const numberOfMistakes = players.reduce((sum, player) => {
-      return sum + heuristics[player].playedWithCount.max - 1;
-    }, 0);
-    expect(numberOfMistakes).toBe(0);
   });
 
   test("low repeated partners after many iterations", async () => {
