@@ -10,7 +10,8 @@ import {
 } from "@nextui-org/react";
 import { v4 as uuidv4 } from "uuid";
 import { useEffect, useRef, useState } from "react";
-import { AddUser, Delete, Link } from "react-iconly";
+import { AddUser, Delete } from "react-iconly";
+import { PairLinkIcon } from "./PlayerBadge";
 import { Player, Team } from "./matching/heuristics";
 import { useShufflerState } from "./useShuffler";
 import clsx from "clsx";
@@ -110,7 +111,7 @@ export function PlayersModal({
           <p className="text-lg">
             Add or remove players, or link fixed pairs. You can either{" "}
             <span className="font-bold">redo the current round</span> (because
-            you haven't played yet) or{" "}
+            you haven&apos;t played yet) or{" "}
             <span className="font-bold">start a new round</span> with the
             updated roster. Changing fixed pairs always redoes the current
             round.
@@ -174,7 +175,7 @@ export function PlayersModal({
                   {player.name}
                   {partnerName && !player.delete ? (
                     <span className="text-primary text-medium font-normal ml-2 inline-flex items-center gap-1">
-                      <Link size="small" />
+                      <PairLinkIcon size={14} />
                       {partnerName}
                     </span>
                   ) : null}

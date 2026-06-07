@@ -167,7 +167,6 @@ function cacheState(state: State): State {
       rounds,
       volunteerSitoutsByRound,
       playersById,
-      fixedPairs,
     } = state;
     window.localStorage.setItem(
       "state",
@@ -179,7 +178,6 @@ function cacheState(state: State): State {
         rounds,
         volunteerSitoutsByRound,
         playersById,
-        fixedPairs,
       })
     );
   }, 0);

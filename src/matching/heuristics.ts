@@ -553,7 +553,7 @@ const expandVolunteersWithFixedPartners = (
       expanded.add(partner);
     }
   }
-  return [...expanded];
+  return Array.from(expanded);
 };
 
 const buildSitOutUnits = (
