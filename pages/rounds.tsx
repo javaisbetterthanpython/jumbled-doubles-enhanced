@@ -159,7 +159,11 @@ export default function Rounds() {
                     <Spacer y={0.5} />
                     <BadgeGroup>
                       {sitOuts.map((playerId) => (
-                        <PlayerBadge key={playerId} color="default">
+                        <PlayerBadge
+                          key={playerId}
+                          color="default"
+                          playerId={playerId}
+                        >
                           {playerName(playerId)}
                           {volunteers.includes(playerId) ? (
                             <span className="text-neutral-500 font-semibold text-medium">

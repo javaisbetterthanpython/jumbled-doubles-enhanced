@@ -11,6 +11,7 @@ import { useRouter } from "next/router";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { AddUser, Delete, People, User, Document } from "react-iconly";
 import { Court } from "../src/Court";
+import { PairLinkIcon } from "../src/PlayerBadge";
 import {
   newGame,
   useShufflerDispatch,
@@ -18,6 +19,49 @@ import {
   useShufflerWorker,
 } from "../src/useShuffler";
 import { ResetPlayersModal } from "../src/ResetPlayersModal";
+
+type NamePair = [string, string];
+
+function getPartner(name: string, pairs: NamePair[]): string | null {
+  for (const [a, b] of pairs) {
+    if (a === name) return b;
+    if (b === name) return a;
+  }
+  return null;
+}
+
+function isPaired(name: string, pairs: NamePair[]): boolean {
+  return getPartner(name, pairs) !== null;
+}
+
+function removePairForPlayer(pairs: NamePair[], name: string): NamePair[] {
+  return pairs.filter(([a, b]) => a !== name && b !== name);
+}
+
+function addPair(pairs: NamePair[], a: string, b: string): NamePair[] {
+  const sorted: NamePair = a.localeCompare(b) <= 0 ? [a, b] : [b, a];
+  return [
+    ...removePairForPlayer(pairs, a),
+    ...removePairForPlayer(pairs, b),
+    sorted,
+  ];
+}
+
+function renameInPairs(
+  pairs: NamePair[],
+  oldName: string,
+  newName: string
+): NamePair[] {
+  return pairs.map(([a, b]) => {
+    const next: NamePair = [
+      a === oldName ? newName : a,
+      b === oldName ? newName : b,
+    ];
+    return next[0].localeCompare(next[1]) <= 0
+      ? next
+      : [next[1], next[0]];
+  });
+}
 
 function NewGame() {
   const router = useRouter();
@@ -36,6 +80,8 @@ function NewGame() {
   const [courts, setCourts] = useState(state.courts.toString());
   const [customizeCourtNames, setCustomizeCourtNames] = useState(false);
   const [courtNames, setCourtNames] = useState<string[]>([]);
+  const [fixedPairs, setFixedPairs] = useState<NamePair[]>([]);
+  const [linkingPlayer, setLinkingPlayer] = useState<string | null>(null);
 
   const handleAddPlayers = () => {
     if (!playerInput) return;
@@ -64,7 +110,19 @@ function NewGame() {
       setCustomizeCourtNames(true);
       setCourtNames(state.courtNames);
     }
-  }, [state.players, state.courts, state.courtNames]);
+
+    if (state.fixedPairs?.length) {
+      const namePairs = state.fixedPairs
+        .map(([a, b]) => {
+          const nameA = playersById[a]?.name;
+          const nameB = playersById[b]?.name;
+          if (nameA && nameB) return [nameA, nameB] as NamePair;
+          return null;
+        })
+        .filter((pair): pair is NamePair => pair !== null);
+      setFixedPairs(namePairs);
+    }
+  }, [state.players, state.courts, state.courtNames, state.fixedPairs, playersById]);
 
   const handleNewGame = async () => {
     const names = players;
@@ -89,12 +147,40 @@ function NewGame() {
       names,
       courts: courtCount,
       courtNames: customizeCourtNames ? courtNames : [],
+      fixedPairs,
     });
     router.push("/rounds");
   };
 
   const handleResetPlayers = () => {
     setModal("reset-players");
+  };
+
+  const handleLinkClick = (name: string) => {
+    if (isPaired(name, fixedPairs)) return;
+
+    if (linkingPlayer === null) {
+      setLinkingPlayer(name);
+      return;
+    }
+
+    if (linkingPlayer === name) {
+      setLinkingPlayer(null);
+      return;
+    }
+
+    if (isPaired(linkingPlayer, fixedPairs)) {
+      setLinkingPlayer(name);
+      return;
+    }
+
+    setFixedPairs(addPair(fixedPairs, linkingPlayer, name));
+    setLinkingPlayer(null);
+  };
+
+  const handleUnlink = (name: string) => {
+    setFixedPairs(removePairForPlayer(fixedPairs, name));
+    if (linkingPlayer === name) setLinkingPlayer(null);
   };
 
   const playerError = formStatus === "validating" && players.length < 4;
@@ -120,6 +206,8 @@ function NewGame() {
           onClose={() => setModal("none")}
           onSubmit={() => {
             setPlayers([]);
+            setFixedPairs([]);
+            setLinkingPlayer(null);
             setModal("none");
           }}
         />
@@ -179,48 +267,114 @@ function NewGame() {
                 </Button>
               </div>
               <Spacer y={2} />
-              {players.map((name, index) => (
-                <Fragment key={index}>
-                  <div className="flex items-center gap-1">
-                    <User primaryColor="#888" size="medium" />
-                    <span className="text-sm text-gray-500 w-4">
-                      {index + 1}
-                    </span>
-                    <Input
-                      className="flex-1"
-                      aria-label="Player"
-                      value={name}
-                      size="sm"
-                      type="text"
-                      variant="underlined"
-                      onChange={(e) => {
-                        const newName = e.currentTarget.value;
-                        setPlayers([
-                          ...players.slice(0, index),
-                          newName,
-                          ...players.slice(index + 1),
-                        ]);
-                      }}
-                      fullWidth
-                    />
-                    <Button
-                      variant="flat"
-                      color="default"
-                      aria-label={`Remove player named ${name}`}
-                      isIconOnly
-                      onPress={() => {
-                        // Delete this player
-                        setPlayers((players) => [
-                          ...players.slice(0, index),
-                          ...players.slice(index + 1),
-                        ]);
-                      }}
+              {players.map((name, index) => {
+                const partner = getPartner(name, fixedPairs);
+                const paired = partner !== null;
+                const linking = linkingPlayer === name;
+                return (
+                  <Fragment key={index}>
+                    <div
+                      className={`flex items-center gap-1 rounded-lg px-1 ${
+                        linking
+                          ? "ring-2 ring-primary bg-primary-50"
+                          : paired
+                          ? "bg-secondary-50"
+                          : ""
+                      }`}
                     >
-                      <Delete />
-                    </Button>
-                  </div>
-                </Fragment>
-              ))}
+                      <User
+                        primaryColor={paired ? "#7828c8" : "#888"}
+                        size="medium"
+                      />
+                      <span className="text-sm text-gray-500 w-4">
+                        {index + 1}
+                      </span>
+                      <Input
+                        className="flex-1"
+                        aria-label="Player"
+                        value={name}
+                        size="sm"
+                        type="text"
+                        variant="underlined"
+                        onChange={(e) => {
+                          const newName = e.currentTarget.value;
+                          setFixedPairs(
+                            renameInPairs(fixedPairs, name, newName)
+                          );
+                          if (linkingPlayer === name) setLinkingPlayer(newName);
+                          setPlayers([
+                            ...players.slice(0, index),
+                            newName,
+                            ...players.slice(index + 1),
+                          ]);
+                        }}
+                        fullWidth
+                      />
+                      {paired ? (
+                        <>
+                          <span
+                            className="text-xs text-secondary whitespace-nowrap"
+                            title={`Paired with ${partner}`}
+                          >
+                            ↔ {partner}
+                          </span>
+                          <Button
+                            variant="flat"
+                            color="secondary"
+                            aria-label={`Unlink ${name} from ${partner}`}
+                            isIconOnly
+                            onPress={() => handleUnlink(name)}
+                          >
+                            <Delete primaryColor="#7828c8" size="small" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant={linking ? "solid" : "flat"}
+                          color={linking ? "primary" : "default"}
+                          aria-label={
+                            linkingPlayer && linkingPlayer !== name
+                              ? `Pair ${linkingPlayer} with ${name}`
+                              : `Link ${name} as a fixed pair`
+                          }
+                          isIconOnly
+                          onPress={() => handleLinkClick(name)}
+                        >
+                          <PairLinkIcon
+                            color={linking ? "#fff" : "#888"}
+                            size={16}
+                          />
+                        </Button>
+                      )}
+                      <Button
+                        variant="flat"
+                        color="default"
+                        aria-label={`Remove player named ${name}`}
+                        isIconOnly
+                        onPress={() => {
+                          setFixedPairs(removePairForPlayer(fixedPairs, name));
+                          if (linkingPlayer === name) setLinkingPlayer(null);
+                          setPlayers((players) => [
+                            ...players.slice(0, index),
+                            ...players.slice(index + 1),
+                          ]);
+                        }}
+                      >
+                        <Delete />
+                      </Button>
+                    </div>
+                  </Fragment>
+                );
+              })}
+              {linkingPlayer && !isPaired(linkingPlayer, fixedPairs) && (
+                <>
+                  <Spacer y={1} />
+                  <p className="text-sm text-primary">
+                    Tap another player to pair with {linkingPlayer}, or tap{" "}
+                    {linkingPlayer}&apos;s link button again to cancel.
+                  </p>
+                </>
+              )}
             </div>
             <Spacer y={3} />
             <label>

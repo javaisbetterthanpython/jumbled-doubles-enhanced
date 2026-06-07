@@ -16,6 +16,14 @@ const getStats = (numbers: number[]) => ({
   max: max(numbers),
 });
 
+const mockSeededRandom = (seed: number) => {
+  let state = seed;
+  return jest.spyOn(Math, "random").mockImplementation(() => {
+    state = (state * 16807) % 2147483647;
+    return (state - 1) / 2147483646;
+  });
+};
+
 const roundsToString = (rounds: Round[]) =>
   rounds
     .map(
@@ -198,47 +206,59 @@ describe("calculateHeuristics()", () => {
   });
 
   test("5 players, 5 games", async () => {
-    const players = sampleNames.slice(0, 5);
-    const rounds: Round[] = [];
-    for (let player in players) {
-      rounds.push(await getNextBestRound(rounds, players, 1));
+    const randomSpy = mockSeededRandom(42);
+    try {
+      const players = sampleNames.slice(0, 5);
+      const rounds: Round[] = [];
+      for (let player in players) {
+        rounds.push(await getNextBestRound(rounds, players, 1));
+      }
+      const uniqueTeams = new Set();
+      const uniqueSits = new Set();
+      rounds.forEach(({ matches, sitOuts }) => {
+        matches.forEach((match) =>
+          match.forEach((team) => uniqueTeams.add(team.toString()))
+        );
+        sitOuts.forEach((sit) => uniqueSits.add(sit));
+      });
+      expect(uniqueSits.size).toEqual(5);
+      expect(uniqueTeams.size).toEqual(10);
+    } finally {
+      randomSpy.mockRestore();
     }
-    const uniqueTeams = new Set();
-    const uniqueSits = new Set();
-    rounds.forEach(({ matches, sitOuts }) => {
-      matches.forEach((match) =>
-        match.forEach((team) => uniqueTeams.add(team.toString()))
-      );
-      sitOuts.forEach((sit) => uniqueSits.add(sit));
-    });
-    expect(uniqueSits.size).toEqual(5);
-    expect(uniqueTeams.size).toEqual(10);
   });
 
   test("5 players, 15 games", async () => {
-    const results = [];
-    for (let generations = 0; generations < 50; generations++) {
-      const players = sampleNames.slice(0, 5);
-      const rounds: Round[] = [];
-      for (let i = 0; i < 15; i++) {
-        rounds.push(await getNextBestRound(rounds, players, 1));
-      }
-      const uniqueMatches = new Set();
-      rounds.forEach(({ matches }) => {
-        matches.forEach((match) => {
-          const sortedTeams = match.map((team) => team.sort().join(" "));
-          const teamString = sortedTeams.sort().join(" vs ");
-          uniqueMatches.add(teamString);
+    const randomSpy = mockSeededRandom(42);
+    try {
+      const results = [];
+      for (let generations = 0; generations < 50; generations++) {
+        const players = sampleNames.slice(0, 5);
+        const rounds: Round[] = [];
+        for (let i = 0; i < 15; i++) {
+          rounds.push(await getNextBestRound(rounds, players, 1));
+        }
+        const uniqueMatches = new Set();
+        rounds.forEach(({ matches }) => {
+          matches.forEach((match) => {
+            const sortedTeams = match.map((team) =>
+              [...team].sort().join(" ")
+            );
+            const teamString = sortedTeams.sort().join(" vs ");
+            uniqueMatches.add(teamString);
+          });
         });
-      });
-      results.push(uniqueMatches.size);
-    }
+        results.push(uniqueMatches.size);
+      }
 
-    const stats = getStats(results);
-    // Probabilistic scheduling: best run hits all 15 unique matchups; assert strong diversity.
-    expect(stats.max).toBe(15);
-    expect(stats.min).toBeGreaterThanOrEqual(9);
-    expect(stats.mean).toBeGreaterThanOrEqual(12);
+      const stats = getStats(results);
+      // Probabilistic scheduling: best run hits all 15 unique matchups; assert strong diversity.
+      expect(stats.max).toBe(15);
+      expect(stats.min).toBeGreaterThanOrEqual(9);
+      expect(stats.mean).toBeGreaterThanOrEqual(12);
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 
   test("volunteer 1/2 sit outs", async () => {
