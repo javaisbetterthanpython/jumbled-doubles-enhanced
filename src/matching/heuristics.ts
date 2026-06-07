@@ -32,6 +32,9 @@ export type Team = [PlayerId, PlayerId];
 // Instead of using Infinity, use a high number so that comparative values can be calculated.
 export const INFINITY = 9999;
 
+/** Penalty subtracted when two players were partners or opponents in the previous round. */
+export const BACK_TO_BACK_MATCHUP_PENALTY = 5000;
+
 const GENERATIONS = 4;
 const ROUND_LOOKAHEAD = 3;
 const ROUND_ATTEMPTS = 20;
@@ -138,7 +141,10 @@ const getPartnerScore = (
   const playedWithScore =
     netSincePartnered / (netPlayedWithCount * netPlayedWithCount + 1);
 
-  return playedWithScore;
+  const backToBackPenalty =
+    roundsSinceWith === 1 ? BACK_TO_BACK_MATCHUP_PENALTY : 0;
+
+  return playedWithScore - backToBackPenalty;
 };
 
 const getMatchIdentifier = (match: Match): MatchIdentifier => {
@@ -221,7 +227,13 @@ const getOpponentScore = (
       return (
         score +
         opponent.reduce((result, target) => {
-          return result + calculateDesirability(player, target);
+          const backToBackPenalty =
+            heuristics[player].roundsSincePlayedAgainst[target] === 1
+              ? BACK_TO_BACK_MATCHUP_PENALTY
+              : 0;
+          return (
+            result + calculateDesirability(player, target) - backToBackPenalty
+          );
         }, 0)
       );
     }, 0) /
