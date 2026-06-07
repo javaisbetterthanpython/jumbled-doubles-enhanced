@@ -1,0 +1,22 @@
+{
+  "name": "Jumbled Doubles",
+  "short_name": "Jumbled Doubles",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "theme_color": "#3372F4",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "start_url": "/"
+}
