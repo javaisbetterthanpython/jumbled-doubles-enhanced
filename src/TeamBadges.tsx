@@ -1,7 +1,6 @@
 import clsx from "clsx";
-import { Link } from "react-iconly";
 import { BadgeGroup } from "./BadgeGroup";
-import { PlayerBadge } from "./PlayerBadge";
+import { PairLinkIcon, PlayerBadge } from "./PlayerBadge";
 import {
   areFixedPartners,
   getPlayerIdByName,
@@ -42,7 +41,7 @@ export default function TeamBadges({
           {player1}
         </PlayerBadge>
         <span className="opacity-70" aria-hidden>
-          <Link set="light" size="small" />
+          <PairLinkIcon />
         </span>
         <PlayerBadge color={color} playerId={player2Id}>
           {player2}

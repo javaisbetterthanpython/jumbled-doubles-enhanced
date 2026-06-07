@@ -9,8 +9,9 @@ import {
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { Fragment, useEffect, useRef, useState } from "react";
-import { AddUser, Delete, Link, People, User, Document } from "react-iconly";
+import { AddUser, Delete, People, User, Document } from "react-iconly";
 import { Court } from "../src/Court";
+import { PairLinkIcon } from "../src/PlayerBadge";
 import {
   newGame,
   useShufflerDispatch,
@@ -339,10 +340,9 @@ function NewGame() {
                           isIconOnly
                           onPress={() => handleLinkClick(name)}
                         >
-                          <Link
-                            set={linking ? "bold" : "light"}
-                            primaryColor={linking ? "#fff" : "#888"}
-                            size="small"
+                          <PairLinkIcon
+                            color={linking ? "#fff" : "#888"}
+                            size={16}
                           />
                         </Button>
                       )}
