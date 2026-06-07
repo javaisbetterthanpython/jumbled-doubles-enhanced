@@ -1,9 +1,12 @@
 import { PairMaker, Preferences } from "./ranked-matches";
 import { shuffle } from "./roommates";
+import { getVariance } from "./variance";
 
 export type PlayerId = string;
 export type MatchIdentifier = string;
 export type MatchCounts = { [key: MatchIdentifier]: number };
+export type PartnerPairIdentifier = string;
+export type PartnerPairCounts = { [key: PartnerPairIdentifier]: number };
 export type Match = [Team, Team];
 export type Round = {
   matches: Array<Match>;
@@ -152,6 +155,27 @@ const getMatchIdentifier = (match: Match): MatchIdentifier => {
   const teamAIdentifier = teamA.sort().join(" ");
   const teamBIdentifier = teamB.sort().join(" ");
   return [teamAIdentifier, teamBIdentifier].sort().join("|");
+};
+
+const getPartnerPairIdentifier = (team: Team): PartnerPairIdentifier =>
+  team.slice().sort().join(" ");
+
+const getPartnerPairCounts = (
+  rounds: Round[],
+  previousCounts?: PartnerPairCounts
+): PartnerPairCounts => {
+  const result: PartnerPairCounts = previousCounts
+    ? JSON.parse(JSON.stringify(previousCounts))
+    : {};
+  rounds.forEach((round) => {
+    round.matches.forEach((match) => {
+      match.forEach((team) => {
+        const pairId = getPartnerPairIdentifier(team);
+        result[pairId] = (result[pairId] || 0) + 1;
+      });
+    });
+  });
+  return result;
 };
 
 const getUniqueMatchCounts = (
@@ -518,38 +542,6 @@ const getFixedPairPartnerMap = (fixedPairs: Team[]): Map<PlayerId, PlayerId> => 
   return map;
 };
 
-const getActiveFixedTeams = (
-  roundPlayers: PlayerId[],
-  fixedPairs: Team[]
-): Team[] => {
-  const active = new Set(roundPlayers);
-  const assigned = new Set<PlayerId>();
-  const teams: Team[] = [];
-
-  for (const [a, b] of fixedPairs) {
-    if (
-      active.has(a) &&
-      active.has(b) &&
-      !assigned.has(a) &&
-      !assigned.has(b)
-    ) {
-      teams.push([a, b]);
-      assigned.add(a);
-      assigned.add(b);
-    }
-  }
-
-  return teams;
-};
-
-const getUnpairedPlayers = (
-  roundPlayers: PlayerId[],
-  fixedTeams: Team[]
-): PlayerId[] => {
-  const paired = new Set(fixedTeams.flat());
-  return roundPlayers.filter((player) => !paired.has(player));
-};
-
 const expandVolunteersWithFixedPartners = (
   volunteers: PlayerId[],
   partnerMap: Map<PlayerId, PlayerId>
@@ -803,6 +795,7 @@ async function getNextRound(
   fixedPairs: Team[] = []
 ): Promise<[Round, { bestTeamScore: number; bestMatchesScore: number }]> {
   const [uniqueMatchCounts] = getUniqueMatchCounts(rounds);
+  const partnerPairCounts = getPartnerPairCounts(rounds);
 
   let bestTeamScore = Infinity;
   let bestTeams: { teams: Team[]; sitOuts: PlayerId[] } = {
@@ -814,8 +807,14 @@ async function getNextRound(
 
   const seenTeams: { [key: string]: number } = {};
   let uniqueTeamSets: number = 0;
+  let teamSetAttempts = 0;
+  const maxTeamSetAttempts = Math.max(targetUniqueGenerations * 50, 50);
 
-  while (uniqueTeamSets < targetUniqueGenerations) {
+  while (
+    uniqueTeamSets < targetUniqueGenerations &&
+    teamSetAttempts < maxTeamSetAttempts
+  ) {
+    teamSetAttempts += 1;
     await new Promise((resolve) => resolve(undefined));
     /* Decide who sits out. */
     const [sitoutPlayers, roundPlayers] = getSitOuts(
@@ -869,7 +868,10 @@ async function getNextRound(
         bPlayedWith[a] === bPlayedWith.max && bPlayedWith[a] !== bPlayedWith.min
           ? 1
           : 0;
-      return result + aScore + bScore;
+      const repeatedPartnerCount =
+        partnerPairCounts[getPartnerPairIdentifier([a, b])] || 0;
+      const partnerPairPenalty = Math.pow(repeatedPartnerCount, 2);
+      return result + aScore + bScore + partnerPairPenalty;
     }, 0);
 
     if (score < bestTeamScore) {
@@ -878,7 +880,7 @@ async function getNextRound(
     }
   }
 
-  if (!bestTeams) {
+  if (!bestTeams.teams.length) {
     throw new Error("no teams found");
   }
 
@@ -951,10 +953,12 @@ async function getNextBestRound(
     opponentScore: number;
     partnerScore: number;
     duplicates: number;
+    variance: number;
   } = {
     opponentScore: Infinity,
     partnerScore: Infinity,
     duplicates: Infinity,
+    variance: Infinity,
   };
   let selectedRound: Round | null = null;
   for (let attempt = 0; attempt < ROUND_ATTEMPTS; attempt++) {
@@ -964,6 +968,7 @@ async function getNextBestRound(
     let partnerScore = 0;
     let opponentScore = Infinity;
     let duplicates = 0;
+    let variance = Infinity;
     for (
       let roundGeneration = 0;
       roundGeneration < ROUND_LOOKAHEAD;
@@ -991,15 +996,24 @@ async function getNextBestRound(
       }
     }
 
+    const partnerCountValues = players.flatMap((player) =>
+      players
+        .filter((other) => other !== player)
+        .map((other) => newHeuristics[player].playedWithCount[other] ?? 0)
+    );
+    variance = getVariance(partnerCountValues);
+
     if (bestRoundScore.duplicates < duplicates) continue;
     if (bestRoundScore.partnerScore < partnerScore) continue;
-    // Partner score better or equal. Opponent score counts for fallback.
+    if (bestRoundScore.opponentScore < opponentScore) continue;
+    // Variance fairness is the final tiebreaker after matchup quality.
     if (
       duplicates < bestRoundScore.duplicates ||
       partnerScore < bestRoundScore.partnerScore ||
-      opponentScore < bestRoundScore.opponentScore
+      opponentScore < bestRoundScore.opponentScore ||
+      variance < bestRoundScore.variance
     ) {
-      bestRoundScore = { partnerScore, opponentScore, duplicates };
+      bestRoundScore = { partnerScore, opponentScore, duplicates, variance };
       selectedRound = newRounds[0];
     }
   }
@@ -1012,6 +1026,8 @@ export {
   getNextRound,
   getNextBestRound,
   getOpponentScore as opponentScore,
+  getPartnerPairCounts,
+  getPartnerPairIdentifier,
   getPartnerScore as partnerScore,
   getTeamPreferences,
 };
