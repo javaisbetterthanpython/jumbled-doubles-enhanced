@@ -666,7 +666,8 @@ async function getNextBestRound(
   rounds: Round[],
   players: PlayerId[],
   courts: number,
-  volunteerSitouts?: PlayerId[]
+  volunteerSitouts?: PlayerId[],
+  _fixedPairs: Team[] = []
 ): Promise<Round> {
   // Go forward 3 rounds a few times and choose the best direction.
   // Try to avoid local tight spots.

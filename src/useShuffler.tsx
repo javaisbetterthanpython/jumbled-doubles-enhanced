@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Player, PlayerId, Round } from "./matching/heuristics";
+import { Player, PlayerId, Round, Team } from "./matching/heuristics";
 import { v4 as uuidv4 } from "uuid";
 
 type NewRoundOptions = {
@@ -13,6 +13,7 @@ type NewGameOptions = {
   names: string[];
   courts: number;
   courtNames: string[];
+  fixedPairs?: Team[];
 };
 
 type EditCourts = {
@@ -36,6 +37,7 @@ type Action =
         playersById: Record<PlayerId, Player>;
         courts: number;
         courtNames: string[];
+        fixedPairs: Team[];
       };
     }
   | {
@@ -68,6 +70,7 @@ type State = {
   rounds: Round[];
   courts: number;
   courtNames: string[];
+  fixedPairs: Team[];
   volunteerSitoutsByRound: PlayerId[][];
   playersById: Record<PlayerId, Player>;
   generating: boolean;
@@ -82,6 +85,7 @@ const defaultState: State = {
   rounds: [],
   courts: 2,
   courtNames: [],
+  fixedPairs: [],
   generating: false,
   cacheLoaded: false,
 };
@@ -123,6 +127,7 @@ function loadFromCache(previousState: State): State {
       volunteerSitoutsByRound,
       playersById,
       courtNames = [],
+      fixedPairs = [],
     } = JSON.parse(storageState);
     if (
       !Array.isArray(players) ||
@@ -139,6 +144,7 @@ function loadFromCache(previousState: State): State {
       rounds,
       courts,
       courtNames,
+      fixedPairs,
       cacheLoaded: true,
       generating: false,
     };
@@ -157,6 +163,7 @@ function cacheState(state: State): State {
       rounds,
       volunteerSitoutsByRound,
       playersById,
+      fixedPairs,
     } = state;
     window.localStorage.setItem(
       "state",
@@ -167,6 +174,7 @@ function cacheState(state: State): State {
         rounds,
         volunteerSitoutsByRound,
         playersById,
+        fixedPairs,
       })
     );
   }, 0);
@@ -177,7 +185,7 @@ function shufflerReducer(state: State, action: Action): State {
   switch (action.type) {
     case "new-game-start": {
       const { payload } = action;
-      const { players, playersById, courts, courtNames } = payload;
+      const { players, playersById, courts, courtNames, fixedPairs } = payload;
 
       return cacheState({
         ...state,
@@ -185,6 +193,7 @@ function shufflerReducer(state: State, action: Action): State {
         playersById,
         courts,
         courtNames,
+        fixedPairs,
         rounds: [],
         volunteerSitoutsByRound: [],
         generating: true,
@@ -248,7 +257,8 @@ async function newRound(
       rounds,
       state.players,
       state.courts,
-      payload.volunteerSitouts
+      payload.volunteerSitouts,
+      state.fixedPairs
     );
     dispatch({
       type: "new-round",
@@ -267,7 +277,7 @@ async function newGame(
 ) {
   if (!worker) return;
   if (state.generating) return;
-  const { courts, names, courtNames } = payload;
+  const { courts, names, courtNames, fixedPairs = [] } = payload;
   const players = createPlayers(names).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
@@ -280,10 +290,18 @@ async function newGame(
       playersById,
       courts,
       courtNames,
+      fixedPairs,
     },
   });
   try {
-    const nextRound = await generateRound(worker, [], playerIds, courts, []);
+    const nextRound = await generateRound(
+      worker,
+      [],
+      playerIds,
+      courts,
+      [],
+      fixedPairs
+    );
     dispatch({ type: "new-game", payload: nextRound });
   } catch (error) {
     dispatch({ type: "new-game-fail", payload: { error: error as Error } });
@@ -295,7 +313,8 @@ async function generateRound(
   rounds: Round[],
   players: PlayerId[],
   courts: number,
-  volunteerSitouts: PlayerId[]
+  volunteerSitouts: PlayerId[],
+  fixedPairs: Team[]
 ): Promise<Round> {
   return new Promise((resolve, reject) => {
     const messageCallback = (event: MessageEvent<Round>) => {
@@ -310,7 +329,7 @@ async function generateRound(
     };
     worker.addEventListener("error", errorCallback);
 
-    worker.postMessage([rounds, players, courts, volunteerSitouts]);
+    worker.postMessage([rounds, players, courts, volunteerSitouts, fixedPairs]);
   });
 }
 
@@ -338,7 +357,8 @@ async function editCourts(
       rounds,
       state.players,
       courts,
-      volunteerSitouts
+      volunteerSitouts,
+      state.fixedPairs
     );
     dispatch({
       type: "new-round",
@@ -380,7 +400,8 @@ async function editPlayers(
       rounds,
       playerIds,
       state.courts,
-      volunteerSitouts
+      volunteerSitouts,
+      state.fixedPairs
     );
     dispatch({
       type: "new-round",
