@@ -16,6 +16,14 @@ const getStats = (numbers: number[]) => ({
   max: max(numbers),
 });
 
+const mockSeededRandom = (seed: number) => {
+  let state = seed;
+  return jest.spyOn(Math, "random").mockImplementation(() => {
+    state = (state * 16807) % 2147483647;
+    return (state - 1) / 2147483646;
+  });
+};
+
 const roundsToString = (rounds: Round[]) =>
   rounds
     .map(
