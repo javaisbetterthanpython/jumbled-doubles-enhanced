@@ -260,4 +260,82 @@ describe("calculateHeuristics()", () => {
   });
 
   test("performance after everyone has played together", async () => {});
+
+  test("fixed pair players always team together", async () => {
+    const players = ["a", "b", "c", "d", "e", "f"];
+    const fixedPairs: [string, string][] = [["a", "b"]];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 20; i++) {
+      const [nextRound] = await getNextRound(
+        rounds,
+        players,
+        1,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+      rounds.push(nextRound);
+
+      const playingTeams = nextRound.matches.flat();
+      const teamWithA = playingTeams.find(
+        (team) => team.includes("a") || team.includes("b")
+      );
+      expect(teamWithA).toBeDefined();
+      expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
+    }
+  });
+
+  test("multiple fixed pairs stay together", async () => {
+    const players = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const fixedPairs: [string, string][] = [
+      ["a", "b"],
+      ["c", "d"],
+    ];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const [nextRound] = await getNextRound(
+        rounds,
+        players,
+        2,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+      rounds.push(nextRound);
+
+      const playingTeams = nextRound.matches.flat();
+      for (const [first, second] of fixedPairs) {
+        const team = playingTeams.find(
+          (pair) => pair.includes(first) || pair.includes(second)
+        );
+        expect(team).toEqual(expect.arrayContaining([first, second]));
+      }
+    }
+  });
+
+  test("fixed pairs with odd player count", async () => {
+    const players = ["a", "b", "c", "d", "e"];
+    const fixedPairs: [string, string][] = [["a", "b"]];
+
+    for (let i = 0; i < 10; i++) {
+      const [nextRound] = await getNextRound(
+        [],
+        players,
+        1,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+
+      const playingTeams = nextRound.matches.flat();
+      const teamWithA = playingTeams.find(
+        (team) => team.includes("a") || team.includes("b")
+      );
+      if (teamWithA) {
+        expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
+      }
+    }
+  });
 });

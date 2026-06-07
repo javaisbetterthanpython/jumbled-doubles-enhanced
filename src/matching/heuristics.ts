@@ -441,6 +441,38 @@ const getTeamPreferences = (
   }, {});
 };
 
+const getActiveFixedTeams = (
+  roundPlayers: PlayerId[],
+  fixedPairs: Team[]
+): Team[] => {
+  const active = new Set(roundPlayers);
+  const assigned = new Set<PlayerId>();
+  const teams: Team[] = [];
+
+  for (const [a, b] of fixedPairs) {
+    if (
+      active.has(a) &&
+      active.has(b) &&
+      !assigned.has(a) &&
+      !assigned.has(b)
+    ) {
+      teams.push([a, b]);
+      assigned.add(a);
+      assigned.add(b);
+    }
+  }
+
+  return teams;
+};
+
+const getUnpairedPlayers = (
+  roundPlayers: PlayerId[],
+  fixedTeams: Team[]
+): PlayerId[] => {
+  const paired = new Set(fixedTeams.flat());
+  return roundPlayers.filter((player) => !paired.has(player));
+};
+
 const pickFromListBiasBeginning = <T>(
   list: T[],
   count: number,
@@ -550,7 +582,8 @@ async function getNextRound(
   players: PlayerId[],
   courts: number,
   volunteerSitouts?: PlayerId[],
-  heuristics: PlayerHeuristicsDictionary = getHeuristics(rounds, players)
+  heuristics: PlayerHeuristicsDictionary = getHeuristics(rounds, players),
+  fixedPairs: Team[] = []
 ): Promise<[Round, { bestTeamScore: number; bestMatchesScore: number }]> {
   const [uniqueMatchCounts] = getUniqueMatchCounts(rounds);
 
@@ -578,14 +611,25 @@ async function getNextRound(
     const sitOuts = sitoutPlayers.sort(); // Sort by ID for stable order.
 
     /* Make partnerships. */
-    // Get ranked preferences for each player.
-    const partnerPreferences: Preferences = getPartnerPreferences(
-      roundPlayers,
-      heuristics
-    );
-    const partnerMaker = new PairMaker(partnerPreferences);
-    partnerMaker.solve();
-    const teams: Team[] = partnerMaker.solvedGroups as Team[];
+    const fixedTeams = getActiveFixedTeams(roundPlayers, fixedPairs);
+    const unpairedPlayers = getUnpairedPlayers(roundPlayers, fixedTeams);
+
+    if (unpairedPlayers.length % 2 !== 0) {
+      continue;
+    }
+
+    let pairMakerTeams: Team[] = [];
+    if (unpairedPlayers.length >= 2) {
+      const partnerPreferences: Preferences = getPartnerPreferences(
+        unpairedPlayers,
+        heuristics
+      );
+      const partnerMaker = new PairMaker(partnerPreferences);
+      partnerMaker.solve();
+      pairMakerTeams = partnerMaker.solvedGroups as Team[];
+    }
+
+    const teams: Team[] = [...fixedTeams, ...pairMakerTeams];
 
     const teamSetCount = seenTeams[JSON.stringify(teams)] || 0;
     seenTeams[JSON.stringify(teams)] = teamSetCount + 1;
@@ -679,7 +723,7 @@ async function getNextBestRound(
   players: PlayerId[],
   courts: number,
   volunteerSitouts?: PlayerId[],
-  _fixedPairs: Team[] = []
+  fixedPairs: Team[] = []
 ): Promise<Round> {
   // Go forward 3 rounds a few times and choose the best direction.
   // Try to avoid local tight spots.
@@ -713,7 +757,8 @@ async function getNextBestRound(
           players,
           courts,
           volunteerSitouts,
-          heuristics
+          heuristics,
+          fixedPairs
         );
         const [, newDuplicates] = getUniqueMatchCounts([newRound], matchCounts);
         newHeuristics = getHeuristics([newRound], players, newHeuristics);
