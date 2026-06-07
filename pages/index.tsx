@@ -38,13 +38,13 @@ export default function Home() {
             outs, partners, and opponents across any number of courts.
           </p>
           <p>
-            It's an alternative to a round-robin format (fixed partnerships) and
+            It&apos;s an alternative to a round-robin format (fixed partnerships) and
             ladder courts (more competitive).
           </p>
 
           <Link href="/new">
             <Button color="primary" className="mt-4">
-              Start shufflin'
+              Start shufflin&apos;
             </Button>
           </Link>
 

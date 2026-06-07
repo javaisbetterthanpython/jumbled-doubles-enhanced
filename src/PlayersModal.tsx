@@ -76,7 +76,7 @@ export function PlayersModal({
           <p className="text-lg">
             Add or remove players. You can either{" "}
             <span className="font-bold">redo the current round</span> (because
-            you haven't played yet) or{" "}
+            you haven&apos;t played yet) or{" "}
             <span className="font-bold">start a new round</span> with the
             updated roster.
           </p>
