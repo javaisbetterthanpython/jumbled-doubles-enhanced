@@ -1,12 +1,14 @@
 import * as React from "react";
 import { Player, PlayerId, Round, Team } from "./matching/heuristics";
 import { v4 as uuidv4 } from "uuid";
+import { sanitizeFixedPairs } from "./fixedPairs";
 
 type NewRoundOptions = {
   volunteerSitouts: PlayerId[];
   regenerate?: boolean;
   players?: PlayerId[];
   playersById?: Record<PlayerId, Player>;
+  fixedPairs?: Team[];
 };
 
 type NewGameOptions = {
@@ -22,6 +24,7 @@ type EditCourts = {
 };
 type EditPlayers = {
   newPlayers: Player[];
+  fixedPairs: Team[];
   regenerate: boolean;
 };
 
@@ -225,6 +228,7 @@ function shufflerReducer(state: State, action: Action): State {
           : state.volunteerSitoutsByRound,
         players: action.payload.players || state.players,
         playersById: action.payload.playersById || state.playersById,
+        fixedPairs: action.payload.fixedPairs ?? state.fixedPairs,
       };
     case "new-round": {
       return cacheState({
@@ -320,7 +324,7 @@ async function generateRound(
   players: PlayerId[],
   courts: number,
   volunteerSitouts: PlayerId[],
-  fixedPairs: Team[]
+  fixedPairs: Team[] = []
 ): Promise<Round> {
   return new Promise((resolve, reject) => {
     const messageCallback = (event: MessageEvent<Round>) => {
@@ -387,7 +391,7 @@ async function editPlayers(
 ) {
   if (!worker) return;
   if (state.generating) return;
-  const { newPlayers, regenerate } = payload;
+  const { newPlayers, fixedPairs, regenerate } = payload;
   const volunteerSitouts = regenerate
     ? state.volunteerSitoutsByRound.slice(-1)[0]
     : [];
@@ -395,10 +399,17 @@ async function editPlayers(
 
   const playerIds = newPlayers.map(({ id }) => id);
   const playersById = getPlayersById(state.playersById, newPlayers);
+  const sanitizedPairs = sanitizeFixedPairs(fixedPairs, playerIds);
 
   dispatch({
     type: "start-generation",
-    payload: { volunteerSitouts, regenerate, playersById, players: playerIds },
+    payload: {
+      volunteerSitouts,
+      regenerate,
+      playersById,
+      players: playerIds,
+      fixedPairs: sanitizedPairs,
+    },
   });
   try {
     const nextRound = await generateRound(
@@ -407,7 +418,7 @@ async function editPlayers(
       playerIds,
       state.courts,
       volunteerSitouts,
-      state.fixedPairs
+      sanitizedPairs
     );
     dispatch({
       type: "new-round",
