@@ -13,7 +13,7 @@ type NewGameOptions = {
   names: string[];
   courts: number;
   courtNames: string[];
-  fixedPairs?: Team[];
+  fixedPairs?: [string, string][];
 };
 
 type EditCourts = {
@@ -160,6 +160,7 @@ function cacheState(state: State): State {
       players,
       courts,
       courtNames,
+      fixedPairs,
       rounds,
       volunteerSitoutsByRound,
       playersById,
@@ -171,6 +172,7 @@ function cacheState(state: State): State {
         players,
         courts,
         courtNames,
+        fixedPairs,
         rounds,
         volunteerSitoutsByRound,
         playersById,
@@ -277,12 +279,16 @@ async function newGame(
 ) {
   if (!worker) return;
   if (state.generating) return;
-  const { courts, names, courtNames, fixedPairs = [] } = payload;
+  const { courts, names, courtNames, fixedPairs: namePairs = [] } = payload;
   const players = createPlayers(names).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
   const playerIds = players.map(({ id }) => id);
   const playersById = getPlayersById({}, players);
+  const nameToId = Object.fromEntries(players.map((p) => [p.name, p.id]));
+  const fixedPairs: Team[] = namePairs
+    .map(([a, b]) => [nameToId[a], nameToId[b]] as Team)
+    .filter(([a, b]) => a && b);
   dispatch({
     type: "new-game-start",
     payload: {
