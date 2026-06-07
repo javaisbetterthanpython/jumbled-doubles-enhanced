@@ -40,7 +40,7 @@ export const BACK_TO_BACK_MATCHUP_PENALTY = 5000;
 
 const GENERATIONS = 4;
 const ROUND_LOOKAHEAD = 3;
-const ROUND_ATTEMPTS = 20;
+const ROUND_ATTEMPTS = 30;
 
 /**
  * Populate default player scores for each person.
@@ -886,6 +886,7 @@ async function getNextRound(
 
   /* Make matchups. */
   let bestMatchesScore = Infinity;
+  let bestBackToBackOpponents = Infinity;
   let bestMatches: Match[] | null = null;
   for (let i = 0; i < GENERATIONS; i++) {
     await new Promise((resolve) => resolve(undefined));
@@ -922,7 +923,16 @@ async function getNextRound(
         return score + playerScore / players.length;
       }, 0);
 
-    if (averageScore < bestMatchesScore) {
+    const backToBackOpponents = countBackToBackOpponentRepeats(
+      { matches, sitOuts: bestTeams.sitOuts },
+      heuristics
+    );
+    if (
+      backToBackOpponents < bestBackToBackOpponents ||
+      (backToBackOpponents === bestBackToBackOpponents &&
+        averageScore < bestMatchesScore)
+    ) {
+      bestBackToBackOpponents = backToBackOpponents;
       bestMatchesScore = averageScore;
       bestMatches = matches;
     }
@@ -938,6 +948,23 @@ async function getNextRound(
   ];
 }
 
+const countBackToBackOpponentRepeats = (
+  round: Round,
+  heuristics: PlayerHeuristicsDictionary
+): number => {
+  let count = 0;
+  round.matches.forEach(([teamA, teamB]) => {
+    teamA.forEach((playerA) => {
+      teamB.forEach((playerB) => {
+        if (heuristics[playerA].roundsSincePlayedAgainst[playerB] === 1) {
+          count += 1;
+        }
+      });
+    });
+  });
+  return count;
+};
+
 async function getNextBestRound(
   rounds: Round[],
   players: PlayerId[],
@@ -950,11 +977,13 @@ async function getNextBestRound(
   const heuristics = getHeuristics(rounds, players);
   const [matchCounts] = getUniqueMatchCounts(rounds);
   let bestRoundScore: {
+    backToBackOpponents: number;
     opponentScore: number;
     partnerScore: number;
     duplicates: number;
     variance: number;
   } = {
+    backToBackOpponents: Infinity,
     opponentScore: Infinity,
     partnerScore: Infinity,
     duplicates: Infinity,
@@ -965,6 +994,7 @@ async function getNextBestRound(
     await new Promise((resolve) => resolve(undefined));
     let newHeuristics = heuristics;
     let newRounds = [];
+    let backToBackOpponents = Infinity;
     let partnerScore = 0;
     let opponentScore = Infinity;
     let duplicates = 0;
@@ -986,6 +1016,12 @@ async function getNextBestRound(
         const [, newDuplicates] = getUniqueMatchCounts([newRound], matchCounts);
         newHeuristics = getHeuristics([newRound], players, newHeuristics);
         newRounds.push(newRound);
+        if (roundGeneration === 0) {
+          backToBackOpponents = countBackToBackOpponentRepeats(
+            newRound,
+            heuristics
+          );
+        }
         // We care more about the short term team score and duplicates.
         partnerScore +=
           roundStats.bestTeamScore * (ROUND_LOOKAHEAD - roundGeneration);
@@ -1003,17 +1039,25 @@ async function getNextBestRound(
     );
     variance = getVariance(partnerCountValues);
 
+    if (bestRoundScore.backToBackOpponents < backToBackOpponents) continue;
     if (bestRoundScore.duplicates < duplicates) continue;
     if (bestRoundScore.partnerScore < partnerScore) continue;
     if (bestRoundScore.opponentScore < opponentScore) continue;
     // Variance fairness is the final tiebreaker after matchup quality.
     if (
+      backToBackOpponents < bestRoundScore.backToBackOpponents ||
       duplicates < bestRoundScore.duplicates ||
       partnerScore < bestRoundScore.partnerScore ||
       opponentScore < bestRoundScore.opponentScore ||
       variance < bestRoundScore.variance
     ) {
-      bestRoundScore = { partnerScore, opponentScore, duplicates, variance };
+      bestRoundScore = {
+        backToBackOpponents,
+        partnerScore,
+        opponentScore,
+        duplicates,
+        variance,
+      };
       selectedRound = newRounds[0];
     }
   }
