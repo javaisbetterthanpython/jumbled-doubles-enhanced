@@ -129,7 +129,7 @@ function NewGame() {
               <div className="flex items-center gap-2">
                 <People />
                 <span id="players-label">
-                  Who's playing?{" "}
+                  Who&apos;s playing?{" "}
                   <span className="italic text-gray-500">
                     {players.length ? `${players.length} players` : ""}
                   </span>
@@ -385,7 +385,7 @@ function NewGame() {
               }}
               className="bg-gradient-to-l from-blue-600 to-pink-600 text-white"
             >
-              Let's play!
+              Let&apos;s play!
             </Button>
             <Spacer y={8} />
           </div>

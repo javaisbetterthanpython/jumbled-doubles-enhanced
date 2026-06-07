@@ -22,6 +22,14 @@ yarn build
 
 See [docs/WORKFLOW.md](docs/WORKFLOW.md). In Cursor, run `/jumbled-tick` or ask the agent to use the `jumbled-orchestrator` skill.
 
+## Attribution
+
+See [ATTRIBUTION.md](ATTRIBUTION.md) for upstream credits and fork enhancements.
+
+## Attribution
+
+See [ATTRIBUTION.md](ATTRIBUTION.md) for upstream credit and fork enhancements.
+
 ## License
 
 MIT (inherited from upstream pickleball-shuffler)
