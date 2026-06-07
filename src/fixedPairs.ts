@@ -53,3 +53,49 @@ export function getPlayerIdByName(
 ): PlayerId | undefined {
   return Object.values(playersById).find((player) => player.name === name)?.id;
 }
+
+export function sanitizeFixedPairs(
+  fixedPairs: Team[],
+  activePlayerIds: Iterable<PlayerId>
+): Team[] {
+  const active = new Set(activePlayerIds);
+  const seen = new Set<string>();
+  const result: Team[] = [];
+
+  for (const [a, b] of fixedPairs) {
+    if (a === b || !active.has(a) || !active.has(b)) continue;
+    const key = [a, b].sort().join(":");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push([a, b]);
+  }
+
+  return result;
+}
+
+export function setPlayerPair(
+  playerId: PlayerId,
+  partnerId: PlayerId | null,
+  fixedPairs: Team[]
+): Team[] {
+  if (partnerId !== null && playerId === partnerId) return fixedPairs;
+
+  const withoutPlayers = fixedPairs.filter(
+    ([a, b]) =>
+      a !== playerId && b !== playerId && a !== partnerId && b !== partnerId
+  );
+
+  if (partnerId === null) return withoutPlayers;
+
+  return [...withoutPlayers, [playerId, partnerId]];
+}
+
+export function pairsEqual(a: Team[], b: Team[]): boolean {
+  if (a.length !== b.length) return false;
+  const normalize = (pairs: Team[]) =>
+    pairs
+      .map(([x, y]) => [x, y].sort().join(":"))
+      .sort()
+      .join("|");
+  return normalize(a) === normalize(b);
+}

@@ -78,9 +78,10 @@ export default function Rounds() {
         <PlayersModal
           open={playersModal}
           onClose={() => setPlayersModal(false)}
-          onSubmit={async (newPlayers, regenerate) => {
+          onSubmit={async (newPlayers, fixedPairs, regenerate) => {
             await editPlayers(dispatch, state, worker, {
               newPlayers,
+              fixedPairs,
               regenerate,
             });
             if (!regenerate && roundIndex) setRoundIndex((index) => index + 1);

@@ -10,10 +10,17 @@ import {
 } from "@nextui-org/react";
 import { v4 as uuidv4 } from "uuid";
 import { useEffect, useRef, useState } from "react";
-import { AddUser, Delete } from "react-iconly";
-import { Player } from "./matching/heuristics";
+import { AddUser, Delete, Link } from "react-iconly";
+import { Player, Team } from "./matching/heuristics";
 import { useShufflerState } from "./useShuffler";
 import clsx from "clsx";
+import {
+  getPartnerId,
+  pairsEqual,
+  sanitizeFixedPairs,
+  setPlayerPair,
+} from "./fixedPairs";
+import { PlayerPairSelect } from "./PlayerPairSelect";
 
 export function PlayersModal({
   open,
@@ -22,7 +29,11 @@ export function PlayersModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: (newPlayers: Player[], regenerate: boolean) => void;
+  onSubmit: (
+    newPlayers: Player[],
+    fixedPairs: Team[],
+    regenerate: boolean
+  ) => void;
 }) {
   const state = useShufflerState();
   const [newPlayer, setNewPlayer] = useState("");
@@ -30,17 +41,24 @@ export function PlayersModal({
   const [players, setPlayers] = useState<
     Array<Player & { delete: boolean; new: boolean }>
   >([]);
+  const [fixedPairs, setFixedPairs] = useState<Team[]>([]);
+
+  const activePlayers = players.filter((x) => !x.delete);
+  const activePlayerIds = activePlayers.map(({ id }) => id);
+
   const handleSubmit =
     (regenerate: boolean = false) =>
     () => {
-      const newPlayers = players
-        .filter((x) => !x.delete)
+      const newPlayers = activePlayers
         .map(({ id, name }) => ({ id, name }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      // TODO: error handling for too few players.
       if (newPlayers.length < 4) return;
-      onSubmit(newPlayers, regenerate);
+
+      const sanitizedPairs = sanitizeFixedPairs(fixedPairs, activePlayerIds);
+      const pairsChanged = !pairsEqual(sanitizedPairs, state.fixedPairs);
+      onSubmit(newPlayers, sanitizedPairs, pairsChanged ? true : regenerate);
     };
+
   useEffect(() => {
     if (open) {
       const allPlayers = Object.values(state.playersById);
@@ -55,8 +73,24 @@ export function PlayersModal({
             new: false,
           }))
       );
+      setFixedPairs(state.fixedPairs);
     }
-  }, [open]);
+  }, [open, state.players, state.playersById, state.fixedPairs]);
+
+  const handlePairChange = (playerId: string, partnerId: string | null) => {
+    setFixedPairs((pairs) => setPlayerPair(playerId, partnerId, pairs));
+  };
+
+  const handleToggleDelete = (playerId: string) => {
+    setPlayers((current) => {
+      const updated = current.map((x) =>
+        x.id === playerId ? { ...x, delete: !x.delete } : x
+      );
+      const remainingIds = updated.filter((x) => !x.delete).map((x) => x.id);
+      setFixedPairs((pairs) => sanitizeFixedPairs(pairs, remainingIds));
+      return updated;
+    });
+  };
 
   return (
     <Modal
@@ -74,22 +108,20 @@ export function PlayersModal({
         </ModalHeader>
         <ModalBody>
           <p className="text-lg">
-            Add or remove players. You can either{" "}
+            Add or remove players, or link fixed pairs. You can either{" "}
             <span className="font-bold">redo the current round</span> (because
-            you haven&apos;t played yet) or{" "}
+            you haven't played yet) or{" "}
             <span className="font-bold">start a new round</span> with the
-            updated roster.
+            updated roster. Changing fixed pairs always redoes the current
+            round.
           </p>
           <form
             name="new-player"
             onSubmit={(e) => {
               e.preventDefault();
               const playerName = newPlayer.trim();
-              // No empty input.
               if (!playerName) return;
-              // No duplicate names.
               if (players.some((player) => player.name === playerName)) return;
-              // Update list and clear form.
               setPlayers((players) => [
                 { name: playerName, id: uuidv4(), delete: false, new: true },
                 ...players,
@@ -120,48 +152,64 @@ export function PlayersModal({
               </Button>
             </div>
           </form>
-          {players.map((player) => (
-            <div className="flex items-center border-b-1 pb-3" key={player.id}>
-              <span
-                className={clsx("text-large flex-1", {
-                  "line-through": player.delete,
-                  "text-neutral-400": player.delete,
-                })}
+          {players.map((player) => {
+            const partnerId = getPartnerId(player.id, fixedPairs);
+            const partnerName = partnerId
+              ? players.find((p) => p.id === partnerId)?.name
+              : null;
+
+            return (
+              <div
+                className="flex items-center border-b-1 pb-3 gap-2"
+                key={player.id}
               >
-                {player.new ? "🆕 " : ""}
-                {player.delete ? "❌ " : ""}
-                {player.name}
-              </span>
-              <Spacer x={0.5} />
-              <Button
-                variant="flat"
-                size="sm"
-                color={player.delete ? "success" : "default"}
-                aria-label={
-                  player.delete
-                    ? `Restore player named ${player.name}`
-                    : `Remove player named ${player.name}`
-                }
-                endContent={player.delete ? <AddUser /> : <Delete />}
-                title={player.delete ? "Restore player" : "Remove player"}
-                onPress={() => {
-                  // Toggle delete for this player
-                  setPlayers((players) =>
-                    players.map((x) =>
-                      x.id === player.id
-                        ? {
-                            ...x,
-                            delete: !x.delete,
-                          }
-                        : x
-                    )
-                  );
-                }}
-              >
-                {player.delete ? "Re-add" : "Remove"}
-              </Button>
-            </div>
-          ))}
+                <span
+                  className={clsx("text-large flex-1 min-w-0", {
+                    "line-through": player.delete,
+                    "text-neutral-400": player.delete,
+                  })}
+                >
+                  {player.new ? "🆕 " : ""}
+                  {player.delete ? "❌ " : ""}
+                  {player.name}
+                  {partnerName && !player.delete ? (
+                    <span className="text-primary text-medium font-normal ml-2 inline-flex items-center gap-1">
+                      <Link size="small" />
+                      {partnerName}
+                    </span>
+                  ) : null}
+                </span>
+                {!player.delete ? (
+                  <PlayerPairSelect
+                    playerId={player.id}
+                    playerName={player.name}
+                    players={activePlayers.map(({ id, name }) => ({
+                      id,
+                      name,
+                    }))}
+                    fixedPairs={fixedPairs}
+                    onPairChange={handlePairChange}
+                  />
+                ) : null}
+                <Spacer x={0.5} />
+                <Button
+                  variant="flat"
+                  size="sm"
+                  color={player.delete ? "success" : "default"}
+                  aria-label={
+                    player.delete
+                      ? `Restore player named ${player.name}`
+                      : `Remove player named ${player.name}`
+                  }
+                  endContent={player.delete ? <AddUser /> : <Delete />}
+                  title={player.delete ? "Restore player" : "Remove player"}
+                  onPress={() => handleToggleDelete(player.id)}
+                >
+                  {player.delete ? "Re-add" : "Remove"}
+                </Button>
+              </div>
+            );
+          })}
         </ModalBody>
         <ModalFooter>
           <Button variant="flat" onPress={onClose}>
