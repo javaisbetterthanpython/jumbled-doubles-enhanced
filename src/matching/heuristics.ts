@@ -507,6 +507,207 @@ const pickFromListBiasBeginning = <T>(
   return { picked, remaining };
 };
 
+type SitOutUnit = { members: PlayerId[] };
+
+const getFixedPairPartnerMap = (fixedPairs: Team[]): Map<PlayerId, PlayerId> => {
+  const map = new Map<PlayerId, PlayerId>();
+  for (const [a, b] of fixedPairs) {
+    map.set(a, b);
+    map.set(b, a);
+  }
+  return map;
+};
+
+const getActiveFixedTeams = (
+  roundPlayers: PlayerId[],
+  fixedPairs: Team[]
+): Team[] => {
+  const active = new Set(roundPlayers);
+  const assigned = new Set<PlayerId>();
+  const teams: Team[] = [];
+
+  for (const [a, b] of fixedPairs) {
+    if (
+      active.has(a) &&
+      active.has(b) &&
+      !assigned.has(a) &&
+      !assigned.has(b)
+    ) {
+      teams.push([a, b]);
+      assigned.add(a);
+      assigned.add(b);
+    }
+  }
+
+  return teams;
+};
+
+const getUnpairedPlayers = (
+  roundPlayers: PlayerId[],
+  fixedTeams: Team[]
+): PlayerId[] => {
+  const paired = new Set(fixedTeams.flat());
+  return roundPlayers.filter((player) => !paired.has(player));
+};
+
+const expandVolunteersWithFixedPartners = (
+  volunteers: PlayerId[],
+  partnerMap: Map<PlayerId, PlayerId>
+): PlayerId[] => {
+  const expanded = new Set(volunteers);
+  for (const volunteer of volunteers) {
+    const partner = partnerMap.get(volunteer);
+    if (partner) {
+      expanded.add(partner);
+    }
+  }
+  return [...expanded];
+};
+
+const buildSitOutUnits = (
+  players: PlayerId[],
+  fixedPairs: Team[]
+): SitOutUnit[] => {
+  const playerSet = new Set(players);
+  const paired = new Set<PlayerId>();
+  const units: SitOutUnit[] = [];
+
+  for (const [a, b] of fixedPairs) {
+    if (playerSet.has(a) && playerSet.has(b)) {
+      units.push({ members: [a, b] });
+      paired.add(a);
+      paired.add(b);
+    }
+  }
+
+  for (const player of players) {
+    if (!paired.has(player)) {
+      units.push({ members: [player] });
+    }
+  }
+
+  return units;
+};
+
+const canSumToTarget = (sizes: number[], target: number): boolean => {
+  if (target < 0) return false;
+  if (target === 0) return true;
+  const reachable = new Array(target + 1).fill(false);
+  reachable[0] = true;
+  for (const size of sizes) {
+    for (let sum = target; sum >= size; sum--) {
+      reachable[sum] = reachable[sum] || reachable[sum - size];
+    }
+  }
+  return reachable[target];
+};
+
+const adjustSitOutCountForUnits = (
+  target: number,
+  units: SitOutUnit[]
+): number => {
+  const totalPlayers = units.reduce((sum, unit) => sum + unit.members.length, 0);
+  const sizes = units.map((unit) => unit.members.length);
+
+  if (target > totalPlayers) return totalPlayers;
+  if (canSumToTarget(sizes, target)) return target;
+
+  for (let adjusted = target + 1; adjusted <= totalPlayers; adjusted++) {
+    if (canSumToTarget(sizes, adjusted)) return adjusted;
+  }
+  return totalPlayers;
+};
+
+const unitsToPlayers = (units: SitOutUnit[]): PlayerId[] =>
+  units.flatMap((unit) => unit.members);
+
+const getUnitRoundsSinceSitOut = (
+  unit: SitOutUnit,
+  heuristics: PlayerHeuristicsDictionary
+): number =>
+  Math.max(...unit.members.map((player) => heuristics[player].roundsSinceSitOut));
+
+const getUnitSitOutCount = (
+  unit: SitOutUnit,
+  heuristics: PlayerHeuristicsDictionary
+): number =>
+  Math.min(...unit.members.map((player) => heuristics[player].sitOutCount));
+
+const pickUnitsDeterministic = (
+  units: SitOutUnit[],
+  targetPlayerCount: number
+): { picked: SitOutUnit[]; remaining: SitOutUnit[] } => {
+  const remaining = [...units];
+  const picked: SitOutUnit[] = [];
+  let needed = targetPlayerCount;
+
+  for (let index = 0; index < remaining.length && needed > 0; index++) {
+    const unit = remaining[index];
+    const unitSize = unit.members.length;
+    const restSizes = remaining
+      .slice(index + 1)
+      .map((candidate) => candidate.members.length);
+    if (unitSize <= needed && canSumToTarget(restSizes, needed - unitSize)) {
+      picked.push(unit);
+      remaining.splice(index, 1);
+      needed -= unitSize;
+      index -= 1;
+    }
+  }
+
+  return { picked, remaining };
+};
+
+const pickUnitsForSitOuts = (
+  units: SitOutUnit[],
+  targetPlayerCount: number
+): { picked: SitOutUnit[]; remaining: SitOutUnit[] } => {
+  if (targetPlayerCount === 0) return { picked: [], remaining: units };
+
+  const totalPlayers = unitsToPlayers(units).length;
+  if (targetPlayerCount >= totalPlayers) {
+    return { picked: units, remaining: [] };
+  }
+
+  const remaining = [...units];
+  const picked: SitOutUnit[] = [];
+  let playersPicked = 0;
+  let index = 0;
+  let attempts = 0;
+  const baseChance = 0.6;
+  const maxAttempts = remaining.length * 50;
+
+  while (playersPicked < targetPlayerCount && remaining.length > 0) {
+    attempts += 1;
+    if (attempts > maxAttempts) {
+      return pickUnitsDeterministic(units, targetPlayerCount);
+    }
+
+    const unit = remaining[index];
+    const unitSize = unit.members.length;
+    const newTotal = playersPicked + unitSize;
+    const restSizes = remaining
+      .filter((_, unitIndex) => unitIndex !== index)
+      .map((candidate) => candidate.members.length);
+    const canPick =
+      newTotal <= targetPlayerCount &&
+      canSumToTarget(restSizes, targetPlayerCount - newTotal);
+    const rand = Math.random();
+    const chanceForIndex =
+      ((remaining.length - index) / remaining.length) * baseChance;
+
+    if (rand < chanceForIndex && canPick) {
+      picked.push(remaining.splice(index, 1)[0]);
+      playersPicked += unitSize;
+      index = remaining.length ? index % remaining.length : 0;
+    } else {
+      index = (index + 1) % remaining.length;
+    }
+  }
+
+  return { picked, remaining };
+};
+
 /**
  * Choose which players sit out.
  */
@@ -514,64 +715,80 @@ const getSitOuts = (
   heuristics: PlayerHeuristicsDictionary,
   allPlayers: PlayerId[],
   courts: number,
-  volunteers: PlayerId[] = []
+  volunteers: PlayerId[] = [],
+  fixedPairs: Team[] = []
 ) => {
+  const partnerMap = getFixedPairPartnerMap(fixedPairs);
+  const expandedVolunteers = expandVolunteersWithFixedPartners(
+    volunteers,
+    partnerMap
+  );
+
   // Remove volunteer sitouts from possible players.
-  const players = allPlayers.filter((player) =>
-    volunteers.every((volunteer) => volunteer !== player)
+  const players = allPlayers.filter(
+    (player) => !expandedVolunteers.includes(player)
   );
   const capacity = courts * 4;
-  const sitouts =
+  const rawSitouts =
     players.length > capacity
       ? players.length - courts * 4
       : players.length % 4;
 
+  const units = buildSitOutUnits(players, fixedPairs);
+  const sitouts = adjustSitOutCountForUnits(rawSitouts, units);
+
   // Shuffle because at the beginning everyone's rounds since sit out is the same.
-  const inOrderOfSitout = shuffle(players).sort(
-    (a, b) => heuristics[b].roundsSinceSitOut - heuristics[a].roundsSinceSitOut
+  const inOrderOfSitout = shuffle(units).sort(
+    (a, b) =>
+      getUnitRoundsSinceSitOut(b, heuristics) -
+      getUnitRoundsSinceSitOut(a, heuristics)
   );
 
   // Get everyone who has sat out the least number of times.
-  const leastSitOuts = players.reduce((least, player) => {
-    return Math.min(heuristics[player].sitOutCount, least);
+  const leastSitOuts = units.reduce((least, unit) => {
+    return Math.min(getUnitSitOutCount(unit, heuristics), least);
   }, Infinity);
 
   // Two groups: those who are yet to sit out this round, and those who have.
   const { eligibleToSitOut, alreadySatOut } = inOrderOfSitout.reduce(
     (
-      result: { eligibleToSitOut: PlayerId[]; alreadySatOut: PlayerId[] },
-      player
+      result: { eligibleToSitOut: SitOutUnit[]; alreadySatOut: SitOutUnit[] },
+      unit
     ) => {
-      if (heuristics[player].sitOutCount === leastSitOuts) {
-        result.eligibleToSitOut.push(player);
+      if (getUnitSitOutCount(unit, heuristics) === leastSitOuts) {
+        result.eligibleToSitOut.push(unit);
       } else {
-        result.alreadySatOut.push(player);
+        result.alreadySatOut.push(unit);
       }
       return result;
     },
     { eligibleToSitOut: [], alreadySatOut: [] }
   );
 
-  // If the number of sitouts exhausts the remaining sitouts, then collect them all.
-  const mandatorySitouts =
-    sitouts >= eligibleToSitOut.length ? eligibleToSitOut : [];
-
-  // We will pick whatever is left from the main group.
-  const sitoutsLeft = sitouts - mandatorySitouts.length;
+  const eligiblePlayerCount = unitsToPlayers(eligibleToSitOut).length;
+  const mandatoryUnits =
+    sitouts >= eligiblePlayerCount ? eligibleToSitOut : [];
+  const mandatoryPlayerCount = unitsToPlayers(mandatoryUnits).length;
+  const sitoutsLeft = sitouts - mandatoryPlayerCount;
 
   // Pick from the eligibles if there are more eligibles than sitouts needed, otherwise fill up
   // the missing sitouts from the next round.
-  const { picked, remaining } = pickFromListBiasBeginning(
-    mandatorySitouts.length ? alreadySatOut : eligibleToSitOut,
+  const { picked: pickedUnits, remaining: remainingUnits } = pickUnitsForSitOuts(
+    mandatoryUnits.length ? alreadySatOut : eligibleToSitOut,
     sitoutsLeft
   );
 
-  return [
-    // Sitouts: mandatory (if applicable) and picked.
-    [...volunteers, ...mandatorySitouts, ...picked].sort(),
-    // Players: remaining from picked, plus all those who have already sat out if we didn't pick from that group.
-    shuffle([...remaining, ...(mandatorySitouts.length ? [] : alreadySatOut)]),
-  ];
+  const sitOutPlayers = [
+    ...expandedVolunteers,
+    ...unitsToPlayers([...mandatoryUnits, ...pickedUnits]),
+  ].sort();
+
+  const roundPlayerUnits = shuffle([
+    ...remainingUnits,
+    ...(mandatoryUnits.length ? [] : alreadySatOut),
+  ]);
+
+  return [sitOutPlayers, unitsToPlayers(roundPlayerUnits)];
 };
 
 /**
@@ -605,7 +822,8 @@ async function getNextRound(
       heuristics,
       players,
       courts,
-      volunteerSitouts
+      volunteerSitouts,
+      fixedPairs
     );
 
     const sitOuts = sitoutPlayers.sort(); // Sort by ID for stable order.

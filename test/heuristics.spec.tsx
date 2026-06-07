@@ -281,6 +281,43 @@ describe("calculateHeuristics()", () => {
 
   test("performance after everyone has played together", async () => {});
 
+  test("fixed pair members sit out together", async () => {
+    const players = ["a", "b", "c", "d", "e", "f"];
+    const fixedPairs: [string, string][] = [["a", "b"]];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 20; i++) {
+      const [nextRound] = await getNextRound(
+        rounds,
+        players,
+        1,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+      rounds.push(nextRound);
+      const aSits = nextRound.sitOuts.includes("a");
+      const bSits = nextRound.sitOuts.includes("b");
+      expect(aSits).toBe(bSits);
+    }
+  });
+
+  test("volunteer sit-out pulls fixed pair partner", async () => {
+    const players = sampleNames.slice(0, 6);
+    const fixedPairs: [string, string][] = [[players[0], players[1]]];
+    const round = await getNextBestRound(
+      [],
+      players,
+      1,
+      [players[0]],
+      fixedPairs
+    );
+
+    expect(round.sitOuts).toContain(players[0]);
+    expect(round.sitOuts).toContain(players[1]);
+    expect(round.sitOuts).toHaveLength(2);
+  });
+
   test("fixed pair players always team together", async () => {
     const players = ["a", "b", "c", "d", "e", "f"];
     const fixedPairs: [string, string][] = [["a", "b"]];
