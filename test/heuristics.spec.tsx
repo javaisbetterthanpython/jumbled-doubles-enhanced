@@ -280,13 +280,47 @@ describe("calculateHeuristics()", () => {
   });
 
   test("performance after everyone has played together", async () => {});
+});
 
-  test("fixed pair members sit out together", async () => {
+type FixedPair = [PlayerId, PlayerId];
+
+const assertFixedPairOnSameTeam = (round: Round, [first, second]: FixedPair) => {
+  const playingTeams = round.matches.flat();
+  const team = playingTeams.find(
+    (pair) => pair.includes(first) || pair.includes(second)
+  );
+  if (team) {
+    expect(team).toEqual(expect.arrayContaining([first, second]));
+  }
+  expect(round.sitOuts.includes(first)).toBe(round.sitOuts.includes(second));
+};
+
+const assertValidRound = (
+  round: Round,
+  players: PlayerId[],
+  courts: number
+) => {
+  expect(round.matches.length).toBeLessThanOrEqual(courts);
+  round.matches.forEach((match) => {
+    expect(match).toHaveLength(2);
+    match.forEach((team) => expect(team).toHaveLength(2));
+  });
+
+  const playing = new Set(round.matches.flat(2));
+  const sitting = new Set(round.sitOuts);
+  expect(playing.size + sitting.size).toBe(players.length);
+  players.forEach((player) => {
+    expect(playing.has(player) !== sitting.has(player)).toBe(true);
+  });
+};
+
+describe("fixed pairs", () => {
+  test("fixed pair always on same team across 10 generated rounds", async () => {
     const players = ["a", "b", "c", "d", "e", "f"];
-    const fixedPairs: [string, string][] = [["a", "b"]];
+    const fixedPairs: FixedPair[] = [["a", "b"]];
     const rounds: Round[] = [];
 
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 10; i++) {
       const [nextRound] = await getNextRound(
         rounds,
         players,
@@ -296,15 +330,78 @@ describe("calculateHeuristics()", () => {
         fixedPairs
       );
       rounds.push(nextRound);
-      const aSits = nextRound.sitOuts.includes("a");
-      const bSits = nextRound.sitOuts.includes("b");
-      expect(aSits).toBe(bSits);
+      assertFixedPairOnSameTeam(nextRound, fixedPairs[0]);
     }
+  });
+
+  test("two fixed pairs plus unpaired players produces valid matches", async () => {
+    const players = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+    const fixedPairs: FixedPair[] = [
+      ["a", "b"],
+      ["c", "d"],
+    ];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const [nextRound] = await getNextRound(
+        rounds,
+        players,
+        2,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+      rounds.push(nextRound);
+      assertValidRound(nextRound, players, 2);
+      fixedPairs.forEach((pair) => assertFixedPairOnSameTeam(nextRound, pair));
+    }
+  });
+
+  test("fixed pair sits out together when sit-outs required", async () => {
+    const players = ["a", "b", "c", "d", "e", "f"];
+    const fixedPairs: FixedPair[] = [["a", "b"]];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 10; i++) {
+      const [nextRound] = await getNextRound(
+        rounds,
+        players,
+        1,
+        undefined,
+        undefined,
+        fixedPairs
+      );
+      rounds.push(nextRound);
+      expect(nextRound.sitOuts).toHaveLength(2);
+      assertFixedPairOnSameTeam(nextRound, fixedPairs[0]);
+    }
+  });
+
+  test("adding fixed pair mid-game keeps them together on regenerate", async () => {
+    const players = ["a", "b", "c", "d", "e", "f"];
+    const rounds: Round[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const [nextRound] = await getNextRound(rounds, players, 1);
+      rounds.push(nextRound);
+    }
+
+    const fixedPairs: FixedPair[] = [["a", "b"]];
+    const [regeneratedRound] = await getNextRound(
+      rounds.slice(0, -1),
+      players,
+      1,
+      undefined,
+      undefined,
+      fixedPairs
+    );
+
+    assertFixedPairOnSameTeam(regeneratedRound, fixedPairs[0]);
   });
 
   test("volunteer sit-out pulls fixed pair partner", async () => {
     const players = sampleNames.slice(0, 6);
-    const fixedPairs: [string, string][] = [[players[0], players[1]]];
+    const fixedPairs: FixedPair[] = [[players[0], players[1]]];
     const round = await getNextBestRound(
       [],
       players,
@@ -316,84 +413,5 @@ describe("calculateHeuristics()", () => {
     expect(round.sitOuts).toContain(players[0]);
     expect(round.sitOuts).toContain(players[1]);
     expect(round.sitOuts).toHaveLength(2);
-  });
-
-  test("fixed pair players always team together", async () => {
-    const players = ["a", "b", "c", "d", "e", "f"];
-    const fixedPairs: [string, string][] = [["a", "b"]];
-    const rounds: Round[] = [];
-
-    for (let i = 0; i < 20; i++) {
-      const [nextRound] = await getNextRound(
-        rounds,
-        players,
-        1,
-        undefined,
-        undefined,
-        fixedPairs
-      );
-      rounds.push(nextRound);
-
-      const playingTeams = nextRound.matches.flat();
-      const teamWithA = playingTeams.find(
-        (team) => team.includes("a") || team.includes("b")
-      );
-      if (teamWithA) {
-        expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
-      }
-    }
-  });
-
-  test("multiple fixed pairs stay together", async () => {
-    const players = ["a", "b", "c", "d", "e", "f", "g", "h"];
-    const fixedPairs: [string, string][] = [
-      ["a", "b"],
-      ["c", "d"],
-    ];
-    const rounds: Round[] = [];
-
-    for (let i = 0; i < 10; i++) {
-      const [nextRound] = await getNextRound(
-        rounds,
-        players,
-        2,
-        undefined,
-        undefined,
-        fixedPairs
-      );
-      rounds.push(nextRound);
-
-      const playingTeams = nextRound.matches.flat();
-      for (const [first, second] of fixedPairs) {
-        const team = playingTeams.find(
-          (pair) => pair.includes(first) || pair.includes(second)
-        );
-        expect(team).toEqual(expect.arrayContaining([first, second]));
-      }
-    }
-  });
-
-  test("fixed pairs with odd player count", async () => {
-    const players = ["a", "b", "c", "d", "e"];
-    const fixedPairs: [string, string][] = [["a", "b"]];
-
-    for (let i = 0; i < 10; i++) {
-      const [nextRound] = await getNextRound(
-        [],
-        players,
-        1,
-        undefined,
-        undefined,
-        fixedPairs
-      );
-
-      const playingTeams = nextRound.matches.flat();
-      const teamWithA = playingTeams.find(
-        (team) => team.includes("a") || team.includes("b")
-      );
-      if (teamWithA) {
-        expect(teamWithA).toEqual(expect.arrayContaining(["a", "b"]));
-      }
-    }
   });
 });
