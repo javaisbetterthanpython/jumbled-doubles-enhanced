@@ -24,10 +24,6 @@ See [docs/WORKFLOW.md](docs/WORKFLOW.md). In Cursor, run `/jumbled-tick` or ask 
 
 ## Attribution
 
-See [ATTRIBUTION.md](ATTRIBUTION.md) for upstream credits and fork enhancements.
-
-## Attribution
-
 See [ATTRIBUTION.md](ATTRIBUTION.md) for upstream credit and fork enhancements.
 
 ## License
