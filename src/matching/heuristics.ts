@@ -1008,7 +1008,7 @@ async function getNextBestRound(
       roundGeneration++
     ) {
       try {
-        const [candidateRound, roundStats] = await getNextRound(
+        const roundResult = await getNextRound(
           [...rounds, ...newRounds],
           players,
           courts,
@@ -1016,6 +1016,8 @@ async function getNextBestRound(
           newHeuristics,
           fixedPairs
         );
+        const candidateRound = roundResult[0];
+        const roundStats = roundResult[1];
         const [, newDuplicates] = getUniqueMatchCounts(
           [candidateRound],
           matchCounts
