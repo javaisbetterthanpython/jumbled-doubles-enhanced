@@ -57,6 +57,7 @@ type Action =
         round: Round;
         courts?: number;
         volunteerSitouts: PlayerId[];
+        regenerate?: boolean;
       };
     }
   | {
@@ -216,29 +217,41 @@ function shufflerReducer(state: State, action: Action): State {
       return loadFromCache(state);
     }
     case "start-generation":
-      const { regenerate } = action.payload;
       return {
         ...state,
         generating: true,
-        rounds: regenerate ? state.rounds.slice(0, -1) : state.rounds,
-        volunteerSitoutsByRound: regenerate
-          ? state.volunteerSitoutsByRound.slice(0, -1)
-          : state.volunteerSitoutsByRound,
         players: action.payload.players || state.players,
         playersById: action.payload.playersById || state.playersById,
         fixedPairs: action.payload.fixedPairs ?? state.fixedPairs,
       };
     case "new-round": {
+      const { regenerate } = action.payload;
+      const rounds = regenerate
+        ? [...state.rounds.slice(0, -1), action.payload.round]
+        : [...state.rounds, action.payload.round];
+      const volunteerSitoutsByRound = regenerate
+        ? [
+            ...state.volunteerSitoutsByRound.slice(0, -1),
+            action.payload.volunteerSitouts,
+          ]
+        : [
+            ...state.volunteerSitoutsByRound,
+            action.payload.volunteerSitouts,
+          ];
       return cacheState({
         ...state,
         generating: false,
-        rounds: [...state.rounds, action.payload.round],
-        courts: action.payload.courts || state.courts,
-        volunteerSitoutsByRound: [
-          ...state.volunteerSitoutsByRound,
-          action.payload.volunteerSitouts,
-        ],
+        rounds,
+        courts: action.payload.courts ?? state.courts,
+        volunteerSitoutsByRound,
       });
+    }
+    case "new-round-fail":
+    case "new-game-fail": {
+      return {
+        ...state,
+        generating: false,
+      };
     }
   }
   return state;
@@ -264,9 +277,16 @@ async function newRound(
       payload.volunteerSitouts,
       state.fixedPairs
     );
+    if (!nextRound?.matches) {
+      throw new Error("Round generation returned an empty round");
+    }
     dispatch({
       type: "new-round",
-      payload: { round: nextRound, volunteerSitouts: payload.volunteerSitouts },
+      payload: {
+        round: nextRound,
+        volunteerSitouts: payload.volunteerSitouts,
+        regenerate: payload.regenerate ?? false,
+      },
     });
   } catch (error) {
     dispatch({ type: "new-round-fail", payload: { error: error as Error } });
@@ -374,6 +394,7 @@ async function editCourts(
         round,
         volunteerSitouts,
         courts,
+        regenerate,
       },
     });
   } catch (error) {
@@ -423,6 +444,7 @@ async function editPlayers(
       payload: {
         round: nextRound,
         volunteerSitouts,
+        regenerate,
       },
     });
   } catch (error) {

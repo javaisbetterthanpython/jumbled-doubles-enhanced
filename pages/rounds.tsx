@@ -35,17 +35,28 @@ export default function Rounds() {
   const [courtsModal, setCourtsModal] = useState(false);
 
   const [roundIndex, setRoundIndex] = useState(0);
+  const prevRoundCount = React.useRef(state.rounds.length);
 
-  // Handle rounds loading into state.
+  // Jump to latest round when a new round is appended (not when regenerating).
   useEffect(() => {
-    if (state.rounds.length && roundIndex === 0) {
-      setRoundIndex(Math.max(state.rounds.length - 1, 0));
+    if (state.rounds.length > prevRoundCount.current) {
+      setRoundIndex(state.rounds.length - 1);
       window.scrollTo(0, 0);
+    } else if (roundIndex >= state.rounds.length && state.rounds.length > 0) {
+      setRoundIndex(state.rounds.length - 1);
     }
-  }, [state.rounds]);
+    prevRoundCount.current = state.rounds.length;
+  }, [state.rounds.length, roundIndex]);
+
+  useEffect(() => {
+    if (state.rounds.length && roundIndex === 0 && prevRoundCount.current <= 1) {
+      setRoundIndex(Math.max(state.rounds.length - 1, 0));
+    }
+  }, [state.rounds.length, roundIndex]);
+
   const displayIndex = Math.max(
     0,
-    Math.min(roundIndex, state.rounds.length - 1)
+    Math.min(roundIndex, Math.max(state.rounds.length - 1, 0))
   );
   const round = state.rounds[displayIndex];
   const volunteers = state.volunteerSitoutsByRound[displayIndex];
@@ -84,7 +95,6 @@ export default function Rounds() {
               fixedPairs,
               regenerate,
             });
-            if (!regenerate && roundIndex) setRoundIndex((index) => index + 1);
             setPlayersModal(false);
           }}
         />
@@ -96,7 +106,6 @@ export default function Rounds() {
               regenerate,
               courts,
             });
-            if (!regenerate && roundIndex) setRoundIndex((index) => index + 1);
             setCourtsModal(false);
           }}
         />
@@ -138,6 +147,9 @@ export default function Rounds() {
           )}
         </div>
 
+        {state.generating && !round ? (
+          <p className="text-center text-lg my-8">Jumbling the next round…</p>
+        ) : null}
         <div className="flex gap-4 items-stretch justify-center flex-wrap">
           {/* Sitting out */}{" "}
           <div className="basis-full sm:basis-64 md:basis-64 xl:basis-64">
@@ -224,16 +236,17 @@ export default function Rounds() {
         <div className="flex justify-around">
           <Button
             size="lg"
+            isDisabled={state.generating}
             onPress={async () => {
               await newRound(dispatch, state, worker, {
                 volunteerSitouts: [],
               });
-              setRoundIndex(state.rounds.length);
-              window.scrollTo(0, 0);
             }}
             className="bg-gradient-to-l from-blue-600 to-pink-600 text-white"
           >
-            Start round {state.rounds.length + 1}!
+            {state.generating
+              ? "Jumbling…"
+              : `Start round ${state.rounds.length + 1}!`}
           </Button>
         </div>
         <Spacer y={2} />

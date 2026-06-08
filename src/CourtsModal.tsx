@@ -66,13 +66,19 @@ export function CourtsModal({
             Cancel
           </Button>
           <Button
-            onPress={() => onSubmit(parseInt(courts), true)}
+            onPress={() => {
+              const count = parseInt(courts, 10);
+              if (count >= 1) onSubmit(count, true);
+            }}
             color="danger"
           >
             Redo round
           </Button>
           <Button
-            onPress={() => onSubmit(parseInt(courts), false)}
+            onPress={() => {
+              const count = parseInt(courts, 10);
+              if (count >= 1) onSubmit(count, false);
+            }}
             color="primary"
           >
             New round

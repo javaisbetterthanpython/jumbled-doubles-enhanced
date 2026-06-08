@@ -720,11 +720,10 @@ const getSitOuts = (
   const players = allPlayers.filter(
     (player) => !expandedVolunteers.includes(player)
   );
-  const capacity = courts * 4;
-  const rawSitouts =
-    players.length > capacity
-      ? players.length - courts * 4
-      : players.length % 4;
+  const capacity = Math.max(courts, 1) * 4;
+  const playable = Math.min(players.length, capacity);
+  const playableRounded = playable - (playable % 4);
+  const rawSitouts = players.length - playableRounded;
 
   const units = buildSitOutUnits(players, fixedPairs);
   const sitouts = adjustSitOutCountForUnits(rawSitouts, units);
@@ -942,8 +941,12 @@ async function getNextRound(
   if (!bestMatches) {
     throw new Error("no matches found");
   }
+  const maxMatches = Math.max(courts, 1);
   return [
-    { sitOuts: bestTeams.sitOuts, matches: bestMatches },
+    {
+      sitOuts: bestTeams.sitOuts,
+      matches: bestMatches.slice(0, maxMatches),
+    },
     { bestTeamScore, bestMatchesScore },
   ];
 }
@@ -993,7 +996,7 @@ async function getNextBestRound(
   for (let attempt = 0; attempt < ROUND_ATTEMPTS; attempt++) {
     await new Promise((resolve) => resolve(undefined));
     let newHeuristics = heuristics;
-    let newRounds = [];
+    let newRounds: Round[] = [];
     let backToBackOpponents = Infinity;
     let partnerScore = 0;
     let opponentScore = Infinity;
@@ -1005,20 +1008,30 @@ async function getNextBestRound(
       roundGeneration++
     ) {
       try {
-        const [newRound, roundStats] = await getNextRound(
-          rounds,
+        const [candidateRound, roundStats]: [
+          Round,
+          { bestTeamScore: number; bestMatchesScore: number },
+        ] = await getNextRound(
+          [...rounds, ...newRounds],
           players,
           courts,
-          volunteerSitouts,
-          heuristics,
+          roundGeneration === 0 ? volunteerSitouts : [],
+          newHeuristics,
           fixedPairs
         );
-        const [, newDuplicates] = getUniqueMatchCounts([newRound], matchCounts);
-        newHeuristics = getHeuristics([newRound], players, newHeuristics);
-        newRounds.push(newRound);
+        const [, newDuplicates] = getUniqueMatchCounts(
+          [candidateRound],
+          matchCounts
+        );
+        newHeuristics = getHeuristics(
+          [candidateRound],
+          players,
+          newHeuristics
+        );
+        newRounds.push(candidateRound);
         if (roundGeneration === 0) {
           backToBackOpponents = countBackToBackOpponentRepeats(
-            newRound,
+            candidateRound,
             heuristics
           );
         }
@@ -1062,7 +1075,18 @@ async function getNextBestRound(
     }
   }
 
-  return selectedRound!;
+  if (!selectedRound) {
+    const [fallbackRound] = await getNextRound(
+      rounds,
+      players,
+      courts,
+      volunteerSitouts,
+      heuristics,
+      fixedPairs
+    );
+    return fallbackRound;
+  }
+  return selectedRound;
 }
 
 export {
