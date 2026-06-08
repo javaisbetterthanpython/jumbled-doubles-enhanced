@@ -996,7 +996,7 @@ async function getNextBestRound(
   for (let attempt = 0; attempt < ROUND_ATTEMPTS; attempt++) {
     await new Promise((resolve) => resolve(undefined));
     let newHeuristics = heuristics;
-    let newRounds = [];
+    let newRounds: Round[] = [];
     let backToBackOpponents = Infinity;
     let partnerScore = 0;
     let opponentScore = Infinity;
@@ -1008,7 +1008,10 @@ async function getNextBestRound(
       roundGeneration++
     ) {
       try {
-        const roundResult = await getNextRound(
+        const [candidateRound, roundStats]: [
+          Round,
+          { bestTeamScore: number; bestMatchesScore: number },
+        ] = await getNextRound(
           [...rounds, ...newRounds],
           players,
           courts,
@@ -1016,8 +1019,6 @@ async function getNextBestRound(
           newHeuristics,
           fixedPairs
         );
-        const candidateRound = roundResult[0];
-        const roundStats = roundResult[1];
         const [, newDuplicates] = getUniqueMatchCounts(
           [candidateRound],
           matchCounts
