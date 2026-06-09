@@ -403,6 +403,8 @@ async function newGame(
   }
 }
 
+const GENERATION_TIMEOUT_MS = 30_000;
+
 async function generateRound(
   worker: Worker,
   rounds: Round[],
@@ -412,18 +414,40 @@ async function generateRound(
   fixedPairs: Team[] = []
 ): Promise<Round> {
   return new Promise((resolve, reject) => {
-    const messageCallback = (event: MessageEvent<Round>) => {
-      resolve(event.data);
+    let settled = false;
+    const cleanup = () => {
       worker.removeEventListener("message", messageCallback);
+      worker.removeEventListener("error", errorCallback);
+      clearTimeout(timer);
     };
-    worker.addEventListener("message", messageCallback);
+
+    const messageCallback = (event: MessageEvent<Round & { error?: string }>) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (event.data?.error) {
+        reject(new Error(event.data.error));
+      } else {
+        resolve(event.data);
+      }
+    };
 
     const errorCallback = (error: ErrorEvent) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(error);
-      worker.removeEventListener("error", errorCallback);
     };
-    worker.addEventListener("error", errorCallback);
 
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Round generation timed out"));
+    }, GENERATION_TIMEOUT_MS);
+
+    worker.addEventListener("message", messageCallback);
+    worker.addEventListener("error", errorCallback);
     worker.postMessage([rounds, players, courts, volunteerSitouts, fixedPairs]);
   });
 }
