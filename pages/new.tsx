@@ -254,7 +254,7 @@ function NewGame() {
                   size="sm"
                   color="secondary"
                   variant="flat"
-                  onClick={() => handleResetPlayers()}
+                  onPress={() => handleResetPlayers()}
                 >
                   Reset players
                 </Button>
@@ -288,7 +288,7 @@ function NewGame() {
                   aria-label="Add players in text box"
                   isIconOnly
                   type="button"
-                  onClick={() => handleAddPlayers()}
+                  onPress={() => handleAddPlayers()}
                 >
                   <AddUser />
                 </Button>
@@ -484,7 +484,7 @@ function NewGame() {
                       size="sm"
                       color="secondary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),
@@ -500,7 +500,7 @@ function NewGame() {
                       size="sm"
                       color="primary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),
@@ -516,7 +516,7 @@ function NewGame() {
                       size="sm"
                       color="secondary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),
