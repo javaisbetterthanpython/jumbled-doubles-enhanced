@@ -440,7 +440,8 @@ async function newRound(
   pregen: React.MutableRefObject<PregenCache>
 ) {
   if (!worker) return;
-  if (state.generating) return;
+  if (state.generating || roundGenerationInFlight) return;
+  roundGenerationInFlight = true;
   const rounds = payload.regenerate ? state.rounds.slice(0, -1) : state.rounds;
   const players = payload.players ?? state.players;
   const fixedPairs = payload.fixedPairs ?? state.fixedPairs;
@@ -453,23 +454,22 @@ async function newRound(
     fixedPairs,
     payload.volunteerSitouts
   );
-  if (precomputed?.matches) {
-    dispatch({ type: "start-generation", payload });
-    dispatch({
-      type: "new-round",
-      payload: {
-        round: precomputed,
-        volunteerSitouts: payload.volunteerSitouts,
-        regenerate: payload.regenerate ?? false,
-      },
-    });
-    return;
-  }
-
-  invalidatePregen(pregen);
-  dispatch({ type: "start-generation", payload });
-
   try {
+    if (precomputed?.matches) {
+      dispatch({
+        type: "new-round",
+        payload: {
+          round: precomputed,
+          volunteerSitouts: payload.volunteerSitouts,
+          regenerate: payload.regenerate ?? false,
+        },
+      });
+      return;
+    }
+
+    invalidatePregen(pregen);
+    dispatch({ type: "start-generation", payload });
+
     const nextRound = await generateRound(
       worker,
       rounds,
@@ -491,6 +491,8 @@ async function newRound(
     });
   } catch (error) {
     dispatch({ type: "new-round-fail", payload: { error: error as Error } });
+  } finally {
+    roundGenerationInFlight = false;
   }
 }
 
@@ -539,7 +541,11 @@ async function newGame(
   }
 }
 
-async function generateRound(
+// One in-flight worker request at a time (pregen + user clicks share the worker).
+let workerTaskTail: Promise<unknown> = Promise.resolve();
+let roundGenerationInFlight = false;
+
+function generateRoundUncached(
   worker: Worker,
   rounds: Round[],
   players: PlayerId[],
@@ -549,19 +555,47 @@ async function generateRound(
 ): Promise<Round> {
   return new Promise((resolve, reject) => {
     const messageCallback = (event: MessageEvent<Round>) => {
+      cleanup();
       resolve(event.data);
-      worker.removeEventListener("message", messageCallback);
     };
-    worker.addEventListener("message", messageCallback);
-
     const errorCallback = (error: ErrorEvent) => {
+      cleanup();
       reject(error);
+    };
+    const cleanup = () => {
+      worker.removeEventListener("message", messageCallback);
       worker.removeEventListener("error", errorCallback);
     };
+    worker.addEventListener("message", messageCallback);
     worker.addEventListener("error", errorCallback);
 
     worker.postMessage([rounds, players, courts, volunteerSitouts, fixedPairs]);
   });
+}
+
+async function generateRound(
+  worker: Worker,
+  rounds: Round[],
+  players: PlayerId[],
+  courts: number,
+  volunteerSitouts: PlayerId[],
+  fixedPairs: Team[] = []
+): Promise<Round> {
+  const task = () =>
+    generateRoundUncached(
+      worker,
+      rounds,
+      players,
+      courts,
+      volunteerSitouts,
+      fixedPairs
+    );
+  const result = workerTaskTail.then(task, task);
+  workerTaskTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
 }
 
 async function editCourts(
@@ -588,10 +622,6 @@ async function editCourts(
     volunteerSitouts
   );
   if (precomputed?.matches) {
-    dispatch({
-      type: "start-generation",
-      payload: { volunteerSitouts, regenerate },
-    });
     dispatch({
       type: "new-round",
       payload: {
@@ -679,16 +709,6 @@ async function editPlayers(
     volunteerSitouts
   );
   if (precomputed?.matches) {
-    dispatch({
-      type: "start-generation",
-      payload: {
-        volunteerSitouts,
-        regenerate,
-        playersById,
-        players: playerIds,
-        fixedPairs: sanitizedPairs,
-      },
-    });
     dispatch({
       type: "new-round",
       payload: {
