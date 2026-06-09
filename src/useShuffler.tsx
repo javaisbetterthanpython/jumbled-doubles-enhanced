@@ -2,6 +2,7 @@ import * as React from "react";
 import { Player, PlayerId, Round, Team } from "./matching/heuristics";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeFixedPairs } from "./fixedPairs";
+import { renameWithDisambiguation } from "./playerNames";
 
 type NewRoundOptions = {
   volunteerSitouts: PlayerId[];
@@ -67,6 +68,10 @@ type Action =
   | {
       type: "new-round-fail";
       payload: { error: Error };
+    }
+  | {
+      type: "rename-players";
+      payload: { playersById: Record<PlayerId, Player> };
     };
 type Dispatch = (action: Action) => void;
 type State = {
@@ -205,10 +210,15 @@ function shufflerReducer(state: State, action: Action): State {
     }
     case "new-game": {
       const { payload } = action;
+      const round = withNameSnapshot(
+        payload,
+        state.playersById,
+        state.players
+      );
 
       return cacheState({
         ...state,
-        rounds: [payload],
+        rounds: [round],
         volunteerSitoutsByRound: [[]],
         generating: false,
       });
@@ -226,9 +236,14 @@ function shufflerReducer(state: State, action: Action): State {
       };
     case "new-round": {
       const { regenerate } = action.payload;
+      const round = withNameSnapshot(
+        action.payload.round,
+        state.playersById,
+        state.players
+      );
       const rounds = regenerate
-        ? [...state.rounds.slice(0, -1), action.payload.round]
-        : [...state.rounds, action.payload.round];
+        ? [...state.rounds.slice(0, -1), round]
+        : [...state.rounds, round];
       const volunteerSitoutsByRound = regenerate
         ? [
             ...state.volunteerSitoutsByRound.slice(0, -1),
@@ -253,8 +268,39 @@ function shufflerReducer(state: State, action: Action): State {
         generating: false,
       };
     }
+    case "rename-players": {
+      return cacheState({
+        ...state,
+        playersById: action.payload.playersById,
+      });
+    }
   }
   return state;
+}
+
+function snapshotNamesForRound(
+  round: Round,
+  playersById: Record<PlayerId, Player>,
+  activePlayerIds: PlayerId[]
+): Round {
+  const ids = new Set<PlayerId>(activePlayerIds);
+  round.sitOuts.forEach((id) => ids.add(id));
+  round.matches.forEach(([teamA, teamB]) => {
+    teamA.forEach((id) => ids.add(id));
+    teamB.forEach((id) => ids.add(id));
+  });
+  const playerNamesById = Object.fromEntries(
+    Array.from(ids).map((id) => [id, playersById[id]?.name ?? ""])
+  );
+  return { ...round, playerNamesById };
+}
+
+function withNameSnapshot(
+  round: Round,
+  playersById: Record<PlayerId, Player>,
+  activePlayerIds: PlayerId[]
+): Round {
+  return snapshotNamesForRound(round, playersById, activePlayerIds);
 }
 
 async function newRound(
@@ -402,6 +448,24 @@ async function editCourts(
   }
 }
 
+function renamePlayer(
+  dispatch: Dispatch,
+  state: State,
+  playerId: PlayerId,
+  newName: string
+): Record<PlayerId, string> {
+  const allPlayers = Object.values(state.playersById);
+  const namesById = renameWithDisambiguation(allPlayers, playerId, newName);
+  const playersById = { ...state.playersById };
+  for (const [id, name] of Object.entries(namesById)) {
+    if (playersById[id]) {
+      playersById[id] = { ...playersById[id], name };
+    }
+  }
+  dispatch({ type: "rename-players", payload: { playersById } });
+  return namesById;
+}
+
 async function editPlayers(
   dispatch: Dispatch,
   state: State,
@@ -527,4 +591,5 @@ export {
   newGame,
   editCourts,
   editPlayers,
+  renamePlayer,
 };

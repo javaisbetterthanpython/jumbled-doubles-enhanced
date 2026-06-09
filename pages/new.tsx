@@ -19,8 +19,12 @@ import {
   useShufflerWorker,
 } from "../src/useShuffler";
 import { ResetPlayersModal } from "../src/ResetPlayersModal";
+import { PlayerNameEdit } from "../src/PlayerNameEdit";
+import { disambiguateNames, renameWithDisambiguation } from "../src/playerNames";
+import { v4 as uuidv4 } from "uuid";
 
 type NamePair = [string, string];
+type SetupPlayer = { id: string; name: string };
 
 function getPartner(name: string, pairs: NamePair[]): string | null {
   for (const [a, b] of pairs) {
@@ -76,12 +80,26 @@ function NewGame() {
   const [playerInput, setPlayerInput] = useState("");
   const playerInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [players, setPlayers] = useState<string[]>(state.players);
+  const [players, setPlayers] = useState<SetupPlayer[]>([]);
   const [courts, setCourts] = useState(state.courts.toString());
   const [customizeCourtNames, setCustomizeCourtNames] = useState(false);
   const [courtNames, setCourtNames] = useState<string[]>([]);
   const [fixedPairs, setFixedPairs] = useState<NamePair[]>([]);
   const [linkingPlayer, setLinkingPlayer] = useState<string | null>(null);
+
+  const applySetupDisambiguation = (
+    roster: SetupPlayer[],
+    before?: SetupPlayer[]
+  ): SetupPlayer[] => {
+    const names = disambiguateNames(
+      roster.map((p) => ({ id: p.id, name: p.name })),
+      before?.map((p) => ({ id: p.id, name: p.name }))
+    );
+    return roster.map((p) => ({
+      ...p,
+      name: names.get(p.id) ?? p.name,
+    }));
+  };
 
   const handleAddPlayers = () => {
     if (!playerInput) return;
@@ -93,17 +111,24 @@ function NewGame() {
           .filter((x) => !!x)
       )
     );
-    setPlayers((players) => [...players, ...names]);
+    setPlayers((current) => {
+      const before = current;
+      const added = names.map((name) => ({ id: uuidv4(), name }));
+      return applySetupDisambiguation([...current, ...added], before);
+    });
     setPlayerInput("");
     playerInputRef.current?.focus();
   };
 
   // Load last time's players and court names.
   useEffect(() => {
-    const playerNames = [...state.players]
-      .map((id) => playersById[id].name)
-      .sort((a, b) => a.localeCompare(b));
-    setPlayers(playerNames);
+    const loaded = [...state.players]
+      .map((id) => ({
+        id,
+        name: playersById[id].name,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    setPlayers(loaded);
     setCourts(state.courts.toString());
 
     if (state.courtNames.length) {
@@ -125,7 +150,7 @@ function NewGame() {
   }, [state.players, state.courts, state.courtNames, state.fixedPairs, playersById]);
 
   const handleNewGame = async () => {
-    const names = players;
+    const names = players.map((p) => p.name);
     if (names.length < 4) {
       setFormStatus("validating");
       return;
@@ -267,12 +292,13 @@ function NewGame() {
                 </Button>
               </div>
               <Spacer y={2} />
-              {players.map((name, index) => {
+              {players.map((player, index) => {
+                const { id, name } = player;
                 const partner = getPartner(name, fixedPairs);
                 const paired = partner !== null;
                 const linking = linkingPlayer === name;
                 return (
-                  <Fragment key={index}>
+                  <Fragment key={id}>
                     <div
                       className={`flex items-center gap-1 rounded-lg px-1 ${
                         linking
@@ -289,26 +315,27 @@ function NewGame() {
                       <span className="text-sm text-gray-500 w-4">
                         {index + 1}
                       </span>
-                      <Input
-                        className="flex-1"
-                        aria-label="Player"
-                        value={name}
-                        size="sm"
-                        type="text"
-                        variant="underlined"
-                        onChange={(e) => {
-                          const newName = e.currentTarget.value;
-                          setFixedPairs(
-                            renameInPairs(fixedPairs, name, newName)
+                      <PlayerNameEdit
+                        name={name}
+                        onSave={(newName) => {
+                          const namesById = renameWithDisambiguation(
+                            players.map((p) => ({ id: p.id, name: p.name })),
+                            id,
+                            newName
                           );
-                          if (linkingPlayer === name) setLinkingPlayer(newName);
-                          setPlayers([
-                            ...players.slice(0, index),
-                            newName,
-                            ...players.slice(index + 1),
-                          ]);
+                          const oldName = name;
+                          const nextPlayers = players.map((p) => ({
+                            ...p,
+                            name: namesById[p.id] ?? p.name,
+                          }));
+                          setFixedPairs(
+                            renameInPairs(fixedPairs, oldName, namesById[id] ?? newName)
+                          );
+                          if (linkingPlayer === oldName) {
+                            setLinkingPlayer(namesById[id] ?? newName);
+                          }
+                          setPlayers(nextPlayers);
                         }}
-                        fullWidth
                       />
                       {paired ? (
                         <>
@@ -354,10 +381,11 @@ function NewGame() {
                         onPress={() => {
                           setFixedPairs(removePairForPlayer(fixedPairs, name));
                           if (linkingPlayer === name) setLinkingPlayer(null);
-                          setPlayers((players) => [
-                            ...players.slice(0, index),
-                            ...players.slice(index + 1),
-                          ]);
+                          setPlayers((current) => {
+                            const before = current;
+                            const next = current.filter((p) => p.id !== id);
+                            return applySetupDisambiguation(next, before);
+                          });
                         }}
                       >
                         <Delete />

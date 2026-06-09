@@ -5,6 +5,7 @@ import {
   Pagination,
   CardBody,
   Divider,
+  Tooltip,
 } from "@nextui-org/react";
 import Head from "next/head";
 import React, { useEffect, useState } from "react";
@@ -61,8 +62,34 @@ export default function Rounds() {
   const round = state.rounds[displayIndex];
   const volunteers = state.volunteerSitoutsByRound[displayIndex];
   const { sitOuts = [], matches = [] } = round || {};
+  const isHistoricalRound = displayIndex < state.rounds.length - 1;
+
   const playerName = (id: string) => {
-    return state.playersById[id].name;
+    if (isHistoricalRound && round?.playerNamesById?.[id]) {
+      return round.playerNamesById[id];
+    }
+    return state.playersById[id]?.name ?? "";
+  };
+
+  const renderPlayerName = (id: string) => {
+    const displayName = playerName(id);
+    const currentName = state.playersById[id]?.name;
+    const showTooltip =
+      isHistoricalRound &&
+      currentName &&
+      displayName !== currentName;
+
+    if (!showTooltip) {
+      return displayName;
+    }
+
+    return (
+      <Tooltip content={`Now: ${currentName}`}>
+        <span className="cursor-help border-b border-dotted border-neutral-400">
+          {displayName}
+        </span>
+      </Tooltip>
+    );
   };
 
   return (
@@ -177,7 +204,7 @@ export default function Rounds() {
                           color="default"
                           playerId={playerId}
                         >
-                          {playerName(playerId)}
+                          {renderPlayerName(playerId)}
                           {volunteers.includes(playerId) ? (
                             <span className="text-neutral-500 font-semibold text-medium">
                               {" "}
@@ -209,11 +236,22 @@ export default function Rounds() {
                       Court {state.courtNames[index] || index + 1}
                     </h4>
                     <div className="text-center">
-                      <TeamBadges team={teamA.map(playerName).sort()} isHome />
+                      <TeamBadges
+                        teamIds={[...teamA].sort((a, b) =>
+                          playerName(a).localeCompare(playerName(b))
+                        )}
+                        isHome
+                        renderName={renderPlayerName}
+                      />
                       <Spacer y={5} />
                       <div className="relative w-full border-b-1 before:px-4 before:-mx-6 before:bg-white before:-translate-y-1/2 before:font-bold before:absolute before:content-['vs']"></div>
                       <Spacer y={5} />
-                      <TeamBadges team={teamB.map(playerName).sort()} />
+                      <TeamBadges
+                        teamIds={[...teamB].sort((a, b) =>
+                          playerName(a).localeCompare(playerName(b))
+                        )}
+                        renderName={renderPlayerName}
+                      />
                       <Spacer y={1} />
                     </div>
                   </CardBody>

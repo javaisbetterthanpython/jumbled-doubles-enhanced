@@ -13,7 +13,11 @@ import { useEffect, useRef, useState } from "react";
 import { AddUser, Delete } from "react-iconly";
 import { PairLinkIcon } from "./PlayerBadge";
 import { Player, Team } from "./matching/heuristics";
-import { useShufflerState } from "./useShuffler";
+import {
+  renamePlayer,
+  useShufflerDispatch,
+  useShufflerState,
+} from "./useShuffler";
 import clsx from "clsx";
 import {
   getPartnerId,
@@ -22,6 +26,8 @@ import {
   setPlayerPair,
 } from "./fixedPairs";
 import { PlayerPairSelect } from "./PlayerPairSelect";
+import { PlayerNameEdit } from "./PlayerNameEdit";
+import { disambiguateNames } from "./playerNames";
 
 export function PlayersModal({
   open,
@@ -37,6 +43,7 @@ export function PlayersModal({
   ) => void;
 }) {
   const state = useShufflerState();
+  const dispatch = useShufflerDispatch();
   const [newPlayer, setNewPlayer] = useState("");
   const newPlayerRef = useRef<HTMLInputElement>(null);
   const [players, setPlayers] = useState<
@@ -46,6 +53,20 @@ export function PlayersModal({
 
   const activePlayers = players.filter((x) => !x.delete);
   const activePlayerIds = activePlayers.map(({ id }) => id);
+
+  const applyLocalDisambiguation = (
+    roster: Array<Player & { delete: boolean; new: boolean }>,
+    before?: Array<Player & { delete: boolean; new: boolean }>
+  ) => {
+    const names = disambiguateNames(
+      roster.map((p) => ({ id: p.id, name: p.name })),
+      before?.map((p) => ({ id: p.id, name: p.name }))
+    );
+    return roster.map((p) => ({
+      ...p,
+      name: names.get(p.id) ?? p.name,
+    }));
+  };
 
   const handleSubmit =
     (regenerate: boolean = false) =>
@@ -84,13 +105,23 @@ export function PlayersModal({
 
   const handleToggleDelete = (playerId: string) => {
     setPlayers((current) => {
+      const before = current;
       const updated = current.map((x) =>
         x.id === playerId ? { ...x, delete: !x.delete } : x
       );
       const remainingIds = updated.filter((x) => !x.delete).map((x) => x.id);
       setFixedPairs((pairs) => sanitizeFixedPairs(pairs, remainingIds));
-      return updated;
+      return applyLocalDisambiguation(updated, before);
     });
+  };
+
+  const handleRename = (playerId: string, newName: string) => {
+    const namesById = renamePlayer(dispatch, state, playerId, newName);
+    setPlayers((current) =>
+      current.map((p) =>
+        namesById[p.id] ? { ...p, name: namesById[p.id] } : p
+      )
+    );
   };
 
   return (
@@ -109,12 +140,12 @@ export function PlayersModal({
         </ModalHeader>
         <ModalBody>
           <p className="text-lg">
-            Add or remove players, or link fixed pairs. You can either{" "}
+            Add or remove players, link fixed pairs, or tap the pencil to rename.
+            Renames apply immediately. For roster changes, either{" "}
             <span className="font-bold">redo the current round</span> (because
             you haven&apos;t played yet) or{" "}
-            <span className="font-bold">start a new round</span> with the
-            updated roster. Changing fixed pairs always redoes the current
-            round.
+            <span className="font-bold">start a new round</span> with the updated
+            roster. Changing fixed pairs always redoes the current round.
           </p>
           <form
             name="new-player"
@@ -122,11 +153,16 @@ export function PlayersModal({
               e.preventDefault();
               const playerName = newPlayer.trim();
               if (!playerName) return;
-              if (players.some((player) => player.name === playerName)) return;
-              setPlayers((players) => [
-                { name: playerName, id: uuidv4(), delete: false, new: true },
-                ...players,
-              ]);
+              setPlayers((current) => {
+                const before = current;
+                const added = {
+                  name: playerName,
+                  id: uuidv4(),
+                  delete: false,
+                  new: true,
+                };
+                return applyLocalDisambiguation([added, ...current], before);
+              });
               setNewPlayer("");
               newPlayerRef.current?.focus();
             }}
@@ -164,22 +200,26 @@ export function PlayersModal({
                 className="flex items-center border-b-1 pb-3 gap-2"
                 key={player.id}
               >
-                <span
-                  className={clsx("text-large flex-1 min-w-0", {
+                <div
+                  className={clsx("text-large flex-1 min-w-0 flex items-center gap-1", {
                     "line-through": player.delete,
                     "text-neutral-400": player.delete,
                   })}
                 >
                   {player.new ? "🆕 " : ""}
                   {player.delete ? "❌ " : ""}
-                  {player.name}
+                  <PlayerNameEdit
+                    name={player.name}
+                    disabled={false}
+                    onSave={(newName) => handleRename(player.id, newName)}
+                  />
                   {partnerName && !player.delete ? (
-                    <span className="text-primary text-medium font-normal ml-2 inline-flex items-center gap-1">
+                    <span className="text-primary text-medium font-normal ml-2 inline-flex items-center gap-1 shrink-0">
                       <PairLinkIcon size={14} />
                       {partnerName}
                     </span>
                   ) : null}
-                </span>
+                </div>
                 {!player.delete ? (
                   <PlayerPairSelect
                     playerId={player.id}

@@ -4,23 +4,27 @@ Updated by the orchestrator. Status: `open` | `in-progress` | `in-review` | `don
 
 | Priority | Issue | Title | Status | Depends on | PR |
 |----------|-------|-------|--------|------------|-----|
-| 1 | [#1](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/1) | Project bootstrap and attribution | in-progress | — | — |
-| 2 | [#12](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/12) | CI/CD GitHub Actions | in-progress | #1 | — |
-| 3 | [#2](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/2) | Fixed pairs data model | in-progress | #1 | — |
-| 4 | [#6](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/6) | Enhanced diversity scoring | in-progress | #1 | — |
-| 5 | [#7](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/7) | Back-to-back matchup prevention | in-progress | #1 | — |
-| 6 | [#3](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/3) | Fixed pairs algorithm | open | #2 | — |
-| 7 | [#8](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/8) | Fixed pair sit-out logic | open | #3 | — |
-| 8 | [#4](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/4) | Fixed pairs UI — new game | open | #2 | — |
-| 9 | [#5](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/5) | Fixed pairs UI — in-game | open | #2 | — |
-| 10 | [#9](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/9) | Tests — fixed pairs | open | #3, #8 | — |
-| 11 | [#10](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/10) | Tests — diversity | open | #6, #7 | — |
-| 12 | [#11](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/11) | Pair visualization polish | open | #4, #5 | — |
-| 13 | [#13](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/13) | Site comparison validation | open | all above | — |
+| 1 | [#30](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/30) | Richer session mix + instant next round | open | — | — |
+| 2 | [#31](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/31) | Edit player names (in-game + setup) | in-review | — | — |
+| 3 | [#32](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/32) | Recent matchup spacing — formal guarantee | open | #30 | — |
+| 4 | [#33](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/33) | Skill groups — foundation (data model + UI) | open | — | — |
+| 5 | [#34](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/34) | Skill groups — court-to-group mapping + rounds layout | open | #33 | — |
+| 6 | [#35](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/35) | Skill groups — separate/combined round generation | open | #30, #33, #34 | — |
+| 7 | [#36](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/36) | Sit-out modal — draft pre-gen + correct volunteer state | open | #30 | — |
 
 ## Parallel batches
 
-- **Batch A** (now): #1, #12, #2, #6, #7
-- **Batch B** (after #2 merges): #3, #4, #5
-- **Batch C** (after #3/#6/#7): #8, #9, #10, #11
-- **Batch D**: #13
+- **Batch E** (now): #30, #31, #33 (in parallel)
+- **Batch F** (after #30): #32, #36
+- **Batch G** (after #33): #34
+- **Batch H** (after #30 + #33 + #34): #35
+
+## Upstream mapping
+
+| Upstream (pickleball-shuffler) | Enhanced issue |
+|-------------------------------|----------------|
+| #4 Improve generation look-ahead | #30 |
+| #16 Edit player names | #31 |
+| #22 Reduce same person back-to-back | #32 |
+| #25 Run multiple groups | #33, #34, #35 |
+| #32 Volunteer sit-out modal | #36 |
