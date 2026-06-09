@@ -4,15 +4,18 @@ import {
   Spacer,
   Pagination,
   CardBody,
-  Divider,
+  Select,
+  SelectItem,
   Tooltip,
 } from "@nextui-org/react";
 import Head from "next/head";
 import React, { useEffect, useState } from "react";
-import { Edit, People } from "react-iconly";
+import { Edit, People, User } from "react-iconly";
 import { BadgeGroup } from "../src/BadgeGroup";
 import { Court } from "../src/Court";
 import { CourtsModal } from "../src/CourtsModal";
+import { GroupsModal } from "../src/GroupsModal";
+import { GroupPlayMode } from "../src/groups";
 import { PlayerBadge } from "../src/PlayerBadge";
 import { PlayersModal } from "../src/PlayersModal";
 import { SitoutsModal } from "../src/SitoutsModal";
@@ -21,6 +24,8 @@ import {
   editCourts,
   editPlayers,
   newRound,
+  setNextRoundPlayMode,
+  updateGroups,
   useShufflerDispatch,
   useShufflerState,
   useShufflerWorker,
@@ -34,6 +39,7 @@ export default function Rounds() {
   const [sitoutModal, setSitoutModal] = useState(false);
   const [playersModal, setPlayersModal] = useState(false);
   const [courtsModal, setCourtsModal] = useState(false);
+  const [groupsModal, setGroupsModal] = useState(false);
 
   const [roundIndex, setRoundIndex] = useState(0);
   const prevRoundCount = React.useRef(state.rounds.length);
@@ -63,6 +69,9 @@ export default function Rounds() {
   const volunteers = state.volunteerSitoutsByRound[displayIndex];
   const { sitOuts = [], matches = [] } = round || {};
   const isHistoricalRound = displayIndex < state.rounds.length - 1;
+  const isLatestRound = displayIndex === state.rounds.length - 1;
+  const nextPlayMode =
+    state.nextRoundPlayMode ?? state.groups.playMode ?? "separate";
 
   const playerName = (id: string) => {
     if (isHistoricalRound && round?.playerNamesById?.[id]) {
@@ -116,13 +125,22 @@ export default function Rounds() {
         <PlayersModal
           open={playersModal}
           onClose={() => setPlayersModal(false)}
-          onSubmit={async (newPlayers, fixedPairs, regenerate) => {
+          onSubmit={async (newPlayers, fixedPairs, groups, regenerate) => {
             await editPlayers(dispatch, state, worker, {
               newPlayers,
               fixedPairs,
+              groups,
               regenerate,
             });
             setPlayersModal(false);
+          }}
+        />
+        <GroupsModal
+          open={groupsModal}
+          onClose={() => setGroupsModal(false)}
+          onSubmit={(groups) => {
+            updateGroups(dispatch, groups);
+            setGroupsModal(false);
           }}
         />
         <CourtsModal
@@ -153,13 +171,23 @@ export default function Rounds() {
                 {state.players.length}
               </Button>
               <Button
-                aria-label={`${state.players.length} players`}
+                aria-label={`${state.courts} courts`}
                 startContent={<Court />}
                 className="-mt-2"
                 color="primary"
                 onPress={() => setCourtsModal(true)}
               >
                 {state.courts}
+              </Button>
+              <Button
+                aria-label="Skill groups"
+                startContent={<User />}
+                className="-mt-2"
+                color={state.groups.enabled ? "secondary" : "default"}
+                variant={state.groups.enabled ? "solid" : "flat"}
+                onPress={() => setGroupsModal(true)}
+              >
+                Groups
               </Button>
             </>
           ) : (
@@ -271,6 +299,29 @@ export default function Rounds() {
           />
         </div>
         <Spacer y={1.5} />
+        {state.groups.enabled && isLatestRound ? (
+          <div className="flex justify-center mb-4 px-4">
+            <Select
+              label="Next round play mode"
+              aria-label="Play mode for the next round"
+              className="max-w-xs"
+              selectedKeys={[nextPlayMode]}
+              onSelectionChange={(keys) => {
+                const selected = Array.from(keys)[0] as
+                  | GroupPlayMode
+                  | undefined;
+                if (selected) setNextRoundPlayMode(dispatch, selected);
+              }}
+            >
+              <SelectItem key="separate" value="separate">
+                Separate groups
+              </SelectItem>
+              <SelectItem key="combined" value="combined">
+                Combined groups
+              </SelectItem>
+            </Select>
+          </div>
+        ) : null}
         <div className="flex justify-around">
           <Button
             size="lg"
@@ -278,6 +329,7 @@ export default function Rounds() {
             onPress={async () => {
               await newRound(dispatch, state, worker, {
                 volunteerSitouts: [],
+                playMode: nextPlayMode,
               });
             }}
             className="bg-gradient-to-l from-blue-600 to-pink-600 text-white"
