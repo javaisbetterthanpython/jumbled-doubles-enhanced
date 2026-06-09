@@ -5,7 +5,7 @@ Updated by the orchestrator. Status: `open` | `in-progress` | `in-review` | `don
 | Priority | Issue | Title | Status | Depends on | PR |
 |----------|-------|-------|--------|------------|-----|
 | 1 | [#30](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/30) | Richer session mix + instant next round | open | — | — |
-| 2 | [#31](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/31) | Edit player names (in-game + setup) | in-review | — | — |
+| 2 | [#31](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/31) | Edit player names (in-game + setup) | in-review | — | [#37](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/pull/37) |
 | 3 | [#32](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/32) | Recent matchup spacing — formal guarantee | open | #30 | — |
 | 4 | [#33](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/33) | Skill groups — foundation (data model + UI) | open | — | — |
 | 5 | [#34](https://github.com/javaisbetterthanpython/jumbled-doubles-enhanced/issues/34) | Skill groups — court-to-group mapping + rounds layout | open | #33 | — |
