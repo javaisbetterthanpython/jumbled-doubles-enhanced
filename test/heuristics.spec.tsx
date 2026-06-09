@@ -1,13 +1,18 @@
 import {
+  analyzeSessionRepeats,
   getHeuristics,
+  getMaxSessionPairingCount,
   getNextBestRound,
   getNextRound,
+  getOpponentPairIdentifier,
+  getPartnerPairCounts,
   getPartnerPairIdentifier,
   getPartnerPreferences,
   INFINITY,
   PlayerHeuristicsDictionary,
   PlayerId,
   Round,
+  Team,
 } from "../src/matching/heuristics";
 import { getVariance } from "../src/matching/variance";
 import { mean, min, max } from "lodash";
@@ -497,6 +502,162 @@ const assertValidRound = (
     expect(playing.has(player) !== sitting.has(player)).toBe(true);
   });
 };
+
+const maxPartnerRepeatFreeRounds = (
+  playerCount: number,
+  courts: number
+): number => {
+  const capacity = Math.max(courts, 1) * 4;
+  const playable = Math.min(playerCount, capacity);
+  const playableRounded = playable - (playable % 4);
+  if (playableRounded < 4) return 0;
+  return playableRounded - 1;
+};
+
+const countMaxPairingExcess = (
+  rounds: Round[],
+  players: PlayerId[],
+  stat: "playedWithCount" | "playedAgainstCount"
+): number => {
+  const heuristics = getHeuristics(rounds, players);
+  return players.reduce((sum, player) => {
+    return sum + Math.max(0, heuristics[player][stat].max - 1);
+  }, 0);
+};
+
+describe("session-wide no-repeat (#30)", () => {
+  const sessionConfigs = [
+    { playerCount: 8, courts: 2, seeds: [1, 7, 42] },
+    { playerCount: 12, courts: 3, seeds: [2, 11, 99] },
+    { playerCount: 16, courts: 4, seeds: [3, 21, 123] },
+    { playerCount: 20, courts: 5, seeds: [4, 31, 2024] },
+    { playerCount: 28, courts: 6, seeds: [5, 41, 777] },
+  ];
+
+  test.each(sessionConfigs)(
+    "$playerCount players / $courts courts — no partner repeats within full partner cycle",
+    async ({ playerCount, courts, seeds }) => {
+      const roundCount = maxPartnerRepeatFreeRounds(playerCount, courts);
+      expect(roundCount).toBeGreaterThan(0);
+
+      for (const seed of seeds) {
+        const randomSpy = mockSeededRandom(seed);
+        try {
+          const players = sampleNames
+            .concat(
+              Array.from({ length: playerCount - sampleNames.length }, (_, i) =>
+                `P${i}`
+              )
+            )
+            .slice(0, playerCount);
+          const rounds: Round[] = [];
+          for (let i = 0; i < roundCount; i++) {
+            rounds.push(await getNextBestRound(rounds, players, courts));
+          }
+
+          expect(
+            countMaxPairingExcess(rounds, players, "playedWithCount")
+          ).toBe(0);
+        } finally {
+          randomSpy.mockRestore();
+        }
+      }
+    }
+  );
+
+  test.each(sessionConfigs)(
+    "$playerCount players / $courts courts — unavoidable repeats show repeatNote",
+    async ({ playerCount, courts, seeds }) => {
+      for (const seed of seeds) {
+        const randomSpy = mockSeededRandom(seed);
+        try {
+          const players = sampleNames
+            .concat(
+              Array.from({ length: playerCount - sampleNames.length }, (_, i) =>
+                `P${i}`
+              )
+            )
+            .slice(0, playerCount);
+          const rounds: Round[] = [];
+          for (let i = 0; i < 8; i++) {
+            rounds.push(await getNextBestRound(rounds, players, courts));
+          }
+
+          for (let i = 0; i < rounds.length; i++) {
+            const prior = rounds.slice(0, i);
+            const { hasRepeats } = analyzeSessionRepeats(
+              rounds[i],
+              prior,
+              []
+            );
+            if (hasRepeats) {
+              expect(rounds[i].repeatNote).toBeDefined();
+            }
+          }
+        } finally {
+          randomSpy.mockRestore();
+        }
+      }
+    }
+  );
+
+  test("fixed-pair partners exempt from partner repeat detection", () => {
+    const fixedPairs: Team[] = [["a", "b"]];
+    const prior: Round[] = [
+      {
+        matches: [[["a", "b"], ["c", "d"]]],
+        sitOuts: ["e", "f"],
+      },
+    ];
+    // a-b partner again (exempt); face e-f for the first time (no opponent repeats).
+    const round: Round = {
+      matches: [[["a", "b"], ["e", "f"]]],
+      sitOuts: ["c", "d"],
+    };
+    const { hasRepeats } = analyzeSessionRepeats(round, prior, fixedPairs);
+    expect(hasRepeats).toBe(false);
+  });
+
+  test("getMaxSessionPairingCount tracks worst pairing depth", () => {
+    const prior: Round[] = [
+      {
+        matches: [[["a", "b"], ["c", "d"]]],
+        sitOuts: [],
+      },
+      {
+        matches: [[["a", "b"], ["c", "d"]]],
+        sitOuts: [],
+      },
+    ];
+    const round: Round = {
+      matches: [[["a", "b"], ["c", "d"]]],
+      sitOuts: [],
+    };
+    expect(getMaxSessionPairingCount(round, prior)).toBe(3);
+    expect(
+      getOpponentPairIdentifier(round.matches[0][0][0], round.matches[0][1][0])
+    ).toBe("a c");
+  });
+
+  test("degradation avoids third-plus session pairings when possible", async () => {
+    const randomSpy = mockSeededRandom(42);
+    try {
+      const players = sampleNames.slice(0, 8);
+      const rounds = await generateRounds(players, 2, 20, true);
+      let thirdPlus = 0;
+      for (let i = 0; i < rounds.length; i++) {
+        const maxCount = getMaxSessionPairingCount(
+          rounds[i],
+          rounds.slice(0, i)
+        );
+        if (maxCount >= 3) thirdPlus += 1;
+      }
+      expect(thirdPlus).toBe(0);
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+});
 
 describe("fixed pairs", () => {
   test("fixed pair always on same team across 10 generated rounds", async () => {
