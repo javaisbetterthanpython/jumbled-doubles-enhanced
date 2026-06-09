@@ -60,7 +60,7 @@ Use **issue bodies** as the single source of truth for scope. Keep issues small 
 
 - Title: `[#N] Short description`
 - Body must include `Closes #N` and a test plan checklist
-- CI must pass before merge
+- Tests, build, and lint must pass locally before merge (no GitHub Actions CI)
 - Reviewer must leave `APPROVE` or `REQUEST_CHANGES` as a PR comment
 
 ## Running Multiple Workers

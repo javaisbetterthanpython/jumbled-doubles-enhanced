@@ -11,6 +11,8 @@ export type Match = [Team, Team];
 export type Round = {
   matches: Array<Match>;
   sitOuts: Array<PlayerId>;
+  /** Display names frozen when this round was generated. */
+  playerNamesById?: Record<PlayerId, string>;
 };
 export type Player = {
   name: string;
