@@ -37,7 +37,7 @@ Use this document before release to confirm upstream parity and to verify fork-o
 | **Partner-pair counts** | Squared penalties via `partnerPairCounts` / `opponentPairCounts` | `src/matching/heuristics.ts` |
 | **Variance fairness** | `getVariance()` wired into `getNextBestRound` round selection | `src/matching/variance.tsx` |
 | **Tunable search** | `GENERATIONS = 4`, `ROUND_ATTEMPTS = 30`, `ROUND_LOOKAHEAD = 3` | `src/matching/heuristics.ts` |
-| **CI** | `yarn test:ci`, `yarn lint`, `yarn build` on push/PR | `.github/workflows/ci.yml` |
+| **Local verify** | `yarn test:ci`, `yarn lint`, `yarn build` before merge | Run locally; no GitHub Actions |
 
 ---
 

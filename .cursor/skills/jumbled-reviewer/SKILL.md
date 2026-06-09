@@ -23,7 +23,7 @@ git diff main...HEAD --stat
 1. **Scope**: Changes match issue only; no unrelated edits
 2. **Correctness**: Logic handles edge cases (odd players, sit-outs, fixed pairs)
 3. **Tests**: New behavior has tests if issue requires them
-4. **CI**: `yarn test:ci && yarn build && yarn lint` pass locally
+4. **Verify locally**: `yarn test:ci && yarn build && yarn lint` pass (no GitHub CI in this repo)
 5. **Style**: Matches project conventions
 
 ## Severity

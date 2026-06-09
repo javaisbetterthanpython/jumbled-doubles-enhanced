@@ -17,7 +17,7 @@ Coordinate issue-driven development for this repo.
 2. Pick the highest-priority issue whose dependencies are **done** (merged PRs)
 3. If an issue already has an open PR in review, dispatch **reviewer** instead of coder
 4. If reviewer left `REQUEST_CHANGES`, dispatch **fixer** (coder skill, same branch)
-5. If reviewer left `APPROVE` and CI green, merge: `gh pr merge <n> --squash --delete-branch`
+5. If reviewer left `APPROVE`, merge: `gh pr merge <n> --squash --delete-branch` (verify tests/build/lint locally — no GitHub CI)
 6. Update `docs/ISSUE_QUEUE.md` status column
 
 ## Dispatch Coder
