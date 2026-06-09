@@ -21,6 +21,16 @@ import {
 import { ResetPlayersModal } from "../src/ResetPlayersModal";
 import { PlayerNameEdit } from "../src/PlayerNameEdit";
 import { disambiguateNames, renameWithDisambiguation } from "../src/playerNames";
+import { GroupsEditor } from "../src/GroupsEditor";
+import {
+  assignNewPlayersToStandard,
+  defaultGroupsState,
+  ensurePairInHighestGroup,
+  GroupsState,
+  levelFixedPairsForGroups,
+  normalizeGroupsState,
+  sanitizePlayerGroups,
+} from "../src/groups";
 import { v4 as uuidv4 } from "uuid";
 
 type NamePair = [string, string];
@@ -86,6 +96,9 @@ function NewGame() {
   const [courtNames, setCourtNames] = useState<string[]>([]);
   const [fixedPairs, setFixedPairs] = useState<NamePair[]>([]);
   const [linkingPlayer, setLinkingPlayer] = useState<string | null>(null);
+  const [groupsState, setGroupsState] = useState<GroupsState>(
+    defaultGroupsState()
+  );
 
   const applySetupDisambiguation = (
     roster: SetupPlayer[],
@@ -114,7 +127,16 @@ function NewGame() {
     setPlayers((current) => {
       const before = current;
       const added = names.map((name) => ({ id: uuidv4(), name }));
-      return applySetupDisambiguation([...current, ...added], before);
+      const next = applySetupDisambiguation([...current, ...added], before);
+      if (groupsState.enabled) {
+        setGroupsState((gs) =>
+          assignNewPlayersToStandard(
+            gs,
+            added.map((p) => p.id)
+          )
+        );
+      }
+      return next;
     });
     setPlayerInput("");
     playerInputRef.current?.focus();
@@ -147,7 +169,16 @@ function NewGame() {
         .filter((pair): pair is NamePair => pair !== null);
       setFixedPairs(namePairs);
     }
-  }, [state.players, state.courts, state.courtNames, state.fixedPairs, playersById]);
+
+    setGroupsState(normalizeGroupsState(state.groups));
+  }, [
+    state.players,
+    state.courts,
+    state.courtNames,
+    state.fixedPairs,
+    state.groups,
+    playersById,
+  ]);
 
   const handleNewGame = async () => {
     const names = players.map((p) => p.name);
@@ -168,11 +199,23 @@ function NewGame() {
       setFormStatus("validating");
       return;
     }
+    const playerIds = players.map((p) => p.id);
+    const nameToId = Object.fromEntries(players.map((p) => [p.name, p.id]));
+    const pairTeams = fixedPairs
+      .map(([a, b]) => [nameToId[a], nameToId[b]] as [string, string])
+      .filter(([a, b]) => a && b);
+    let setupGroups = groupsState;
+    if (setupGroups.enabled) {
+      setupGroups = sanitizePlayerGroups(setupGroups, playerIds);
+      setupGroups = levelFixedPairsForGroups(pairTeams, setupGroups);
+    }
+
     await newGame(dispatch, state, worker, {
       names,
       courts: courtCount,
       courtNames: customizeCourtNames ? courtNames : [],
       fixedPairs,
+      groups: setupGroups,
     });
     router.push("/rounds");
   };
@@ -200,6 +243,13 @@ function NewGame() {
     }
 
     setFixedPairs(addPair(fixedPairs, linkingPlayer, name));
+    if (groupsState.enabled) {
+      const idA = players.find((p) => p.name === linkingPlayer)?.id;
+      const idB = players.find((p) => p.name === name)?.id;
+      if (idA && idB) {
+        setGroupsState((gs) => ensurePairInHighestGroup(idA, idB, gs));
+      }
+    }
     setLinkingPlayer(null);
   };
 
@@ -553,6 +603,14 @@ function NewGame() {
                 </ol>
               </>
             )}
+            <Spacer y={3} />
+            <GroupsEditor
+              groupsState={groupsState}
+              onChange={setGroupsState}
+              players={players}
+              showEnableToggle
+              enableToggleLabel="Enable skill groups"
+            />
             <Spacer y={4} />
             <Button
               onPress={() => {

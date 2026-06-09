@@ -2,6 +2,15 @@ import * as React from "react";
 import { Player, PlayerId, Round, Team } from "./matching/heuristics";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeFixedPairs } from "./fixedPairs";
+import {
+  assignNewPlayersToStandard,
+  defaultGroupsState,
+  GroupsState,
+  GroupPlayMode,
+  levelFixedPairsForGroups,
+  normalizeGroupsState,
+  sanitizePlayerGroups,
+} from "./groups";
 import { renameWithDisambiguation } from "./playerNames";
 
 type NewRoundOptions = {
@@ -10,6 +19,7 @@ type NewRoundOptions = {
   players?: PlayerId[];
   playersById?: Record<PlayerId, Player>;
   fixedPairs?: Team[];
+  playMode?: GroupPlayMode;
 };
 
 type NewGameOptions = {
@@ -17,6 +27,7 @@ type NewGameOptions = {
   courts: number;
   courtNames: string[];
   fixedPairs?: [string, string][];
+  groups?: GroupsState;
 };
 
 type EditCourts = {
@@ -26,7 +37,12 @@ type EditCourts = {
 type EditPlayers = {
   newPlayers: Player[];
   fixedPairs: Team[];
+  groups?: GroupsState;
   regenerate: boolean;
+};
+
+type UpdateGroups = {
+  groups: GroupsState;
 };
 
 type Action =
@@ -42,6 +58,7 @@ type Action =
         courts: number;
         courtNames: string[];
         fixedPairs: Team[];
+        groups?: GroupsState;
       };
     }
   | {
@@ -59,6 +76,7 @@ type Action =
         courts?: number;
         volunteerSitouts: PlayerId[];
         regenerate?: boolean;
+        playMode?: GroupPlayMode;
       };
     }
   | {
@@ -72,6 +90,14 @@ type Action =
   | {
       type: "rename-players";
       payload: { playersById: Record<PlayerId, Player> };
+    }
+  | {
+      type: "update-groups";
+      payload: UpdateGroups;
+    }
+  | {
+      type: "set-next-round-play-mode";
+      payload: { playMode: GroupPlayMode };
     };
 type Dispatch = (action: Action) => void;
 type State = {
@@ -80,6 +106,11 @@ type State = {
   courts: number;
   courtNames: string[];
   fixedPairs: Team[];
+  groups: GroupsState;
+  /** Play mode used for each round (parallel to rounds). Used by #34 generation. */
+  roundPlayModes: GroupPlayMode[];
+  /** Override for the upcoming round; falls back to groups.playMode. */
+  nextRoundPlayMode?: GroupPlayMode;
   volunteerSitoutsByRound: PlayerId[][];
   playersById: Record<PlayerId, Player>;
   generating: boolean;
@@ -95,9 +126,34 @@ const defaultState: State = {
   courts: 2,
   courtNames: [],
   fixedPairs: [],
+  groups: defaultGroupsState(),
+  roundPlayModes: [],
   generating: false,
   cacheLoaded: false,
 };
+
+function resolvePlayModeForRound(
+  state: State,
+  override?: GroupPlayMode
+): GroupPlayMode {
+  return override ?? state.nextRoundPlayMode ?? state.groups.playMode;
+}
+
+function prepareGroupsForPlayers(
+  groups: GroupsState,
+  playerIds: PlayerId[],
+  fixedPairs: Team[]
+): GroupsState {
+  let next = normalizeGroupsState(groups);
+  if (!next.enabled) return next;
+  next = sanitizePlayerGroups(next, playerIds);
+  next = assignNewPlayersToStandard(
+    next,
+    playerIds.filter((id) => !next.playerGroups[id]?.length)
+  );
+  next = levelFixedPairsForGroups(fixedPairs, next);
+  return next;
+}
 
 const ShufflerStateContext = React.createContext<State | undefined>(undefined);
 const ShufflerDispatchContext = React.createContext<Dispatch | undefined>(
@@ -137,6 +193,9 @@ function loadFromCache(previousState: State): State {
       playersById,
       courtNames = [],
       fixedPairs = [],
+      groups,
+      roundPlayModes = [],
+      nextRoundPlayMode,
     } = JSON.parse(storageState);
     if (
       !Array.isArray(players) ||
@@ -154,6 +213,12 @@ function loadFromCache(previousState: State): State {
       courts,
       courtNames,
       fixedPairs,
+      groups: normalizeGroupsState(groups),
+      roundPlayModes: Array.isArray(roundPlayModes) ? roundPlayModes : [],
+      nextRoundPlayMode:
+        nextRoundPlayMode === "combined" || nextRoundPlayMode === "separate"
+          ? nextRoundPlayMode
+          : undefined,
       cacheLoaded: true,
       generating: false,
     };
@@ -173,6 +238,9 @@ function cacheState(state: State): State {
       rounds,
       volunteerSitoutsByRound,
       playersById,
+      groups,
+      roundPlayModes,
+      nextRoundPlayMode,
     } = state;
     window.localStorage.setItem(
       "state",
@@ -181,6 +249,9 @@ function cacheState(state: State): State {
         courts,
         courtNames,
         fixedPairs,
+        groups,
+        roundPlayModes,
+        nextRoundPlayMode,
         rounds,
         volunteerSitoutsByRound,
         playersById,
@@ -194,7 +265,8 @@ function shufflerReducer(state: State, action: Action): State {
   switch (action.type) {
     case "new-game-start": {
       const { payload } = action;
-      const { players, playersById, courts, courtNames, fixedPairs } = payload;
+      const { players, playersById, courts, courtNames, fixedPairs, groups } =
+        payload;
 
       return cacheState({
         ...state,
@@ -203,7 +275,10 @@ function shufflerReducer(state: State, action: Action): State {
         courts,
         courtNames,
         fixedPairs,
+        groups: groups ?? defaultGroupsState(),
         rounds: [],
+        roundPlayModes: [],
+        nextRoundPlayMode: undefined,
         volunteerSitoutsByRound: [],
         generating: true,
       });
@@ -215,10 +290,13 @@ function shufflerReducer(state: State, action: Action): State {
         state.playersById,
         state.players
       );
+      const firstPlayMode = resolvePlayModeForRound(state);
 
       return cacheState({
         ...state,
         rounds: [round],
+        roundPlayModes: [firstPlayMode],
+        nextRoundPlayMode: undefined,
         volunteerSitoutsByRound: [[]],
         generating: false,
       });
@@ -253,10 +331,20 @@ function shufflerReducer(state: State, action: Action): State {
             ...state.volunteerSitoutsByRound,
             action.payload.volunteerSitouts,
           ];
+      const playMode = resolvePlayModeForRound(
+        state,
+        action.payload.playMode
+      );
+      const roundPlayModes = regenerate
+        ? [...state.roundPlayModes.slice(0, -1), playMode]
+        : [...state.roundPlayModes, playMode];
+
       return cacheState({
         ...state,
         generating: false,
         rounds,
+        roundPlayModes,
+        nextRoundPlayMode: undefined,
         courts: action.payload.courts ?? state.courts,
         volunteerSitoutsByRound,
       });
@@ -272,6 +360,26 @@ function shufflerReducer(state: State, action: Action): State {
       return cacheState({
         ...state,
         playersById: action.payload.playersById,
+      });
+    }
+    case "update-groups": {
+      const groups = prepareGroupsForPlayers(
+        action.payload.groups,
+        state.players,
+        state.fixedPairs
+      );
+      return cacheState({
+        ...state,
+        groups,
+        nextRoundPlayMode: groups.enabled
+          ? (state.nextRoundPlayMode ?? groups.playMode)
+          : undefined,
+      });
+    }
+    case "set-next-round-play-mode": {
+      return cacheState({
+        ...state,
+        nextRoundPlayMode: action.payload.playMode,
       });
     }
   }
@@ -347,7 +455,13 @@ async function newGame(
 ) {
   if (!worker) return;
   if (state.generating) return;
-  const { courts, names, courtNames, fixedPairs: namePairs = [] } = payload;
+  const {
+    courts,
+    names,
+    courtNames,
+    fixedPairs: namePairs = [],
+    groups: setupGroups = defaultGroupsState(),
+  } = payload;
   const players = createPlayers(names).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
@@ -357,14 +471,16 @@ async function newGame(
   const fixedPairs: Team[] = namePairs
     .map(([a, b]) => [nameToId[a], nameToId[b]] as Team)
     .filter(([a, b]) => a && b);
+  const groups = prepareGroupsForPlayers(setupGroups, playerIds, fixedPairs);
   dispatch({
     type: "new-game-start",
     payload: {
-      players: players.map(({ id }) => id),
+      players: playerIds,
       playersById,
       courts,
       courtNames,
       fixedPairs,
+      groups,
     },
   });
   try {
@@ -466,6 +582,14 @@ function renamePlayer(
   return namesById;
 }
 
+function updateGroups(dispatch: Dispatch, groups: GroupsState) {
+  dispatch({ type: "update-groups", payload: { groups } });
+}
+
+function setNextRoundPlayMode(dispatch: Dispatch, playMode: GroupPlayMode) {
+  dispatch({ type: "set-next-round-play-mode", payload: { playMode } });
+}
+
 async function editPlayers(
   dispatch: Dispatch,
   state: State,
@@ -474,7 +598,7 @@ async function editPlayers(
 ) {
   if (!worker) return;
   if (state.generating) return;
-  const { newPlayers, fixedPairs, regenerate } = payload;
+  const { newPlayers, fixedPairs, groups, regenerate } = payload;
   const volunteerSitouts = regenerate
     ? state.volunteerSitoutsByRound.slice(-1)[0]
     : [];
@@ -483,6 +607,11 @@ async function editPlayers(
   const playerIds = newPlayers.map(({ id }) => id);
   const playersById = getPlayersById(state.playersById, newPlayers);
   const sanitizedPairs = sanitizeFixedPairs(fixedPairs, playerIds);
+  const nextGroups = prepareGroupsForPlayers(
+    groups ?? state.groups,
+    playerIds,
+    sanitizedPairs
+  );
 
   dispatch({
     type: "start-generation",
@@ -494,6 +623,7 @@ async function editPlayers(
       fixedPairs: sanitizedPairs,
     },
   });
+  dispatch({ type: "update-groups", payload: { groups: nextGroups } });
   try {
     const nextRound = await generateRound(
       worker,
@@ -592,4 +722,6 @@ export {
   editCourts,
   editPlayers,
   renamePlayer,
+  updateGroups,
+  setNextRoundPlayMode,
 };

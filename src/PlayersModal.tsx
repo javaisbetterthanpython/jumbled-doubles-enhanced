@@ -28,6 +28,15 @@ import {
 import { PlayerPairSelect } from "./PlayerPairSelect";
 import { PlayerNameEdit } from "./PlayerNameEdit";
 import { disambiguateNames } from "./playerNames";
+import { GroupsEditor } from "./GroupsEditor";
+import {
+  allPlayersHaveGroup,
+  ensurePairInHighestGroup,
+  GroupsState,
+  levelFixedPairsForGroups,
+  normalizeGroupsState,
+  sanitizePlayerGroups,
+} from "./groups";
 
 export function PlayersModal({
   open,
@@ -39,6 +48,7 @@ export function PlayersModal({
   onSubmit: (
     newPlayers: Player[],
     fixedPairs: Team[],
+    groups: GroupsState,
     regenerate: boolean
   ) => void;
 }) {
@@ -50,6 +60,9 @@ export function PlayersModal({
     Array<Player & { delete: boolean; new: boolean }>
   >([]);
   const [fixedPairs, setFixedPairs] = useState<Team[]>([]);
+  const [groupsState, setGroupsState] = useState<GroupsState>(
+    normalizeGroupsState(state.groups)
+  );
 
   const activePlayers = players.filter((x) => !x.delete);
   const activePlayerIds = activePlayers.map(({ id }) => id);
@@ -78,7 +91,18 @@ export function PlayersModal({
 
       const sanitizedPairs = sanitizeFixedPairs(fixedPairs, activePlayerIds);
       const pairsChanged = !pairsEqual(sanitizedPairs, state.fixedPairs);
-      onSubmit(newPlayers, sanitizedPairs, pairsChanged ? true : regenerate);
+      let nextGroups = groupsState;
+      if (nextGroups.enabled) {
+        nextGroups = sanitizePlayerGroups(nextGroups, activePlayerIds);
+        nextGroups = levelFixedPairsForGroups(sanitizedPairs, nextGroups);
+        if (!allPlayersHaveGroup(nextGroups, activePlayerIds)) return;
+      }
+      onSubmit(
+        newPlayers,
+        sanitizedPairs,
+        nextGroups,
+        pairsChanged ? true : regenerate
+      );
     };
 
   useEffect(() => {
@@ -96,11 +120,17 @@ export function PlayersModal({
           }))
       );
       setFixedPairs(state.fixedPairs);
+      setGroupsState(normalizeGroupsState(state.groups));
     }
-  }, [open, state.players, state.playersById, state.fixedPairs]);
+  }, [open, state.players, state.playersById, state.fixedPairs, state.groups]);
 
   const handlePairChange = (playerId: string, partnerId: string | null) => {
     setFixedPairs((pairs) => setPlayerPair(playerId, partnerId, pairs));
+    if (groupsState.enabled && partnerId) {
+      setGroupsState((current) =>
+        ensurePairInHighestGroup(playerId, partnerId, current)
+      );
+    }
   };
 
   const handleToggleDelete = (playerId: string) => {
@@ -251,6 +281,13 @@ export function PlayersModal({
               </div>
             );
           })}
+          <GroupsEditor
+            groupsState={groupsState}
+            onChange={setGroupsState}
+            players={activePlayers.map(({ id, name }) => ({ id, name }))}
+            showEnableToggle
+            midSessionNote="Changes apply from the next round onward. Past rounds are unchanged."
+          />
         </ModalBody>
         <ModalFooter>
           <Button variant="flat" onPress={onClose}>

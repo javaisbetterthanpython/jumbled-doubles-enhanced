@@ -2,6 +2,7 @@ import React from "react";
 import clsx from "clsx";
 import { PlayerId } from "./matching/heuristics";
 import { getPartnerName, useFixedPairs } from "./fixedPairs";
+import { isSwingPlayer, useGroups } from "./groups";
 import { useShufflerState } from "./useShuffler";
 
 export function PairLinkIcon({
@@ -54,10 +55,13 @@ export function PlayerBadge({
 }) {
   const fixedPairs = useFixedPairs();
   const state = useShufflerState();
+  const groups = useGroups();
   const partnerName =
     playerId && fixedPairs.length
       ? getPartnerName(playerId, fixedPairs, state.playersById)
       : undefined;
+  const swing =
+    playerId && groups.enabled && isSwingPlayer(playerId, groups);
 
   return (
     <p
@@ -71,6 +75,9 @@ export function PlayerBadge({
         }
       )}
     >
+      {swing ? (
+        <span title="Swing player (multiple groups)">⚠️</span>
+      ) : null}
       {partnerName ? (
         <PairLinkIcon partnerName={partnerName} className="opacity-80" />
       ) : null}
