@@ -121,12 +121,25 @@ function getPlayersById(previous: Record<PlayerId, Player>, players: Player[]) {
   return byId;
 }
 
+/** Ensure one volunteer-sitout list per round (older caches may omit or truncate this). */
+export function normalizeVolunteerSitoutsByRound(
+  roundsLength: number,
+  volunteerSitoutsByRound: unknown
+): PlayerId[][] {
+  const source = Array.isArray(volunteerSitoutsByRound)
+    ? volunteerSitoutsByRound
+    : [];
+  return Array.from({ length: roundsLength }, (_, i) =>
+    Array.isArray(source[i]) ? source[i] : []
+  );
+}
+
 function loadFromCache(previousState: State): State {
   const existingState = previousState || defaultState;
   if (typeof window === "undefined") return existingState;
   const storageState = window.localStorage.getItem("state");
   if (storageState === null) {
-    return existingState;
+    return { ...existingState, cacheLoaded: true };
   }
   try {
     const {
@@ -144,12 +157,19 @@ function loadFromCache(previousState: State): State {
       isNaN(courts) ||
       !playersById
     )
-      return existingState;
+      return { ...existingState, cacheLoaded: true };
+
+    const validPlayers = players.filter(
+      (id: PlayerId) => playersById[id]?.name != null
+    );
 
     return {
-      players,
+      players: validPlayers,
       playersById,
-      volunteerSitoutsByRound,
+      volunteerSitoutsByRound: normalizeVolunteerSitoutsByRound(
+        rounds.length,
+        volunteerSitoutsByRound
+      ),
       rounds,
       courts,
       courtNames,
@@ -158,7 +178,7 @@ function loadFromCache(previousState: State): State {
       generating: false,
     };
   } catch (e) {
-    return existingState;
+    return { ...existingState, cacheLoaded: true };
   }
 }
 
@@ -244,15 +264,16 @@ function shufflerReducer(state: State, action: Action): State {
       const rounds = regenerate
         ? [...state.rounds.slice(0, -1), round]
         : [...state.rounds, round];
+      const priorVolunteers = normalizeVolunteerSitoutsByRound(
+        state.rounds.length,
+        state.volunteerSitoutsByRound
+      );
       const volunteerSitoutsByRound = regenerate
         ? [
-            ...state.volunteerSitoutsByRound.slice(0, -1),
+            ...priorVolunteers.slice(0, -1),
             action.payload.volunteerSitouts,
           ]
-        : [
-            ...state.volunteerSitoutsByRound,
-            action.payload.volunteerSitouts,
-          ];
+        : [...priorVolunteers, action.payload.volunteerSitouts];
       return cacheState({
         ...state,
         generating: false,
@@ -382,6 +403,8 @@ async function newGame(
   }
 }
 
+const GENERATION_TIMEOUT_MS = 30_000;
+
 async function generateRound(
   worker: Worker,
   rounds: Round[],
@@ -391,18 +414,40 @@ async function generateRound(
   fixedPairs: Team[] = []
 ): Promise<Round> {
   return new Promise((resolve, reject) => {
-    const messageCallback = (event: MessageEvent<Round>) => {
-      resolve(event.data);
+    let settled = false;
+    const cleanup = () => {
       worker.removeEventListener("message", messageCallback);
+      worker.removeEventListener("error", errorCallback);
+      clearTimeout(timer);
     };
-    worker.addEventListener("message", messageCallback);
+
+    const messageCallback = (event: MessageEvent<Round & { error?: string }>) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (event.data?.error) {
+        reject(new Error(event.data.error));
+      } else {
+        resolve(event.data);
+      }
+    };
 
     const errorCallback = (error: ErrorEvent) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(error);
-      worker.removeEventListener("error", errorCallback);
     };
-    worker.addEventListener("error", errorCallback);
 
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Round generation timed out"));
+    }, GENERATION_TIMEOUT_MS);
+
+    worker.addEventListener("message", messageCallback);
+    worker.addEventListener("error", errorCallback);
     worker.postMessage([rounds, players, courts, volunteerSitouts, fixedPairs]);
   });
 }
@@ -417,7 +462,7 @@ async function editCourts(
   if (state.generating) return;
   const { courts, regenerate } = payload;
   const volunteerSitouts = regenerate
-    ? state.volunteerSitoutsByRound.slice(-1)[0]
+    ? ((state.volunteerSitoutsByRound ?? []).slice(-1)[0] ?? [])
     : [];
   const rounds = regenerate ? state.rounds.slice(0, -1) : state.rounds;
   dispatch({
@@ -476,7 +521,7 @@ async function editPlayers(
   if (state.generating) return;
   const { newPlayers, fixedPairs, regenerate } = payload;
   const volunteerSitouts = regenerate
-    ? state.volunteerSitoutsByRound.slice(-1)[0]
+    ? ((state.volunteerSitoutsByRound ?? []).slice(-1)[0] ?? [])
     : [];
   const rounds = regenerate ? state.rounds.slice(0, -1) : state.rounds;
 

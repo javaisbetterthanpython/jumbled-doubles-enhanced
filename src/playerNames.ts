@@ -12,6 +12,26 @@ export const PICKLEBALL_ADJECTIVES = [
   "Volley",
   "Smash",
   "Rally",
+  "Drop",
+  "Poach",
+  "Banger",
+  "Flick",
+  "Slice",
+  "Drive",
+  "Baseline",
+  "Cross",
+  "Golden",
+  "Sneaky",
+  "Sharp",
+  "Quick",
+  "Soft",
+  "Power",
+  "Angle",
+  "Net",
+  "Spinny",
+  "Third",
+  "Reset",
+  "ATP",
 ] as const;
 
 const NUMBER_SUFFIX_RE = /^(.+) \((\d+)\)$/;
@@ -40,19 +60,45 @@ function isPlainBaseName(name: string, base: string): boolean {
   return name === base;
 }
 
+function shuffleArray<T>(items: T[]): T[] {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function collectUsedAdjectives(
+  players: Array<{ id: string; name: string }>
+): Set<string> {
+  const used = new Set<string>();
+  for (const player of players) {
+    const adj = getPickleballAdjective(player.name);
+    if (adj) used.add(adj);
+  }
+  return used;
+}
+
 function assignAdjectives(
   members: Array<{ id: string; name: string }>,
-  base: string
+  base: string,
+  usedAdjectives: Set<string>
 ): Map<string, string> {
   const result = new Map<string, string>();
   const sorted = [...members].sort((a, b) => a.id.localeCompare(b.id));
-  let adjIndex = 0;
-  for (const member of sorted) {
-    const adj =
-      PICKLEBALL_ADJECTIVES[adjIndex % PICKLEBALL_ADJECTIVES.length];
-    adjIndex += 1;
-    result.set(member.id, `${adj} ${base}`);
-  }
+  const available = shuffleArray(
+    PICKLEBALL_ADJECTIVES.filter((adj) => !usedAdjectives.has(adj))
+  );
+  sorted.forEach((member, index) => {
+    const adj = available[index];
+    if (adj) {
+      result.set(member.id, `${adj} ${base}`);
+      usedAdjectives.add(adj);
+    } else {
+      result.set(member.id, index === 0 ? base : `${base} (${index + 1})`);
+    }
+  });
   return result;
 }
 
@@ -86,6 +132,7 @@ export function disambiguateNames(
   before?: Array<{ id: string; name: string }>
 ): Map<PlayerId, string> {
   const result = new Map<PlayerId, string>();
+  const usedAdjectives = collectUsedAdjectives(players);
   const byBase = new Map<string, Array<{ id: string; name: string }>>();
 
   for (const player of players) {
@@ -124,7 +171,11 @@ export function disambiguateNames(
     }
 
     if (plainMembers.length >= 2) {
-      const adjectiveAssignments = assignAdjectives(plainMembers, base);
+      const adjectiveAssignments = assignAdjectives(
+        plainMembers,
+        base,
+        usedAdjectives
+      );
       for (const member of members) {
         if (adjectiveAssignments.has(member.id)) {
           result.set(member.id, adjectiveAssignments.get(member.id)!);

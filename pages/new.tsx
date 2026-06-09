@@ -22,6 +22,7 @@ import { ResetPlayersModal } from "../src/ResetPlayersModal";
 import { PlayerNameEdit } from "../src/PlayerNameEdit";
 import { disambiguateNames, renameWithDisambiguation } from "../src/playerNames";
 import { v4 as uuidv4 } from "uuid";
+import clsx from "clsx";
 
 type NamePair = [string, string];
 type SetupPlayer = { id: string; name: string };
@@ -123,6 +124,7 @@ function NewGame() {
   // Load last time's players and court names.
   useEffect(() => {
     const loaded = [...state.players]
+      .filter((id) => playersById[id])
       .map((id) => ({
         id,
         name: playersById[id].name,
@@ -252,7 +254,7 @@ function NewGame() {
                   size="sm"
                   color="secondary"
                   variant="flat"
-                  onClick={() => handleResetPlayers()}
+                  onPress={() => handleResetPlayers()}
                 >
                   Reset players
                 </Button>
@@ -286,7 +288,7 @@ function NewGame() {
                   aria-label="Add players in text box"
                   isIconOnly
                   type="button"
-                  onClick={() => handleAddPlayers()}
+                  onPress={() => handleAddPlayers()}
                 >
                   <AddUser />
                 </Button>
@@ -300,96 +302,110 @@ function NewGame() {
                 return (
                   <Fragment key={id}>
                     <div
-                      className={`flex items-center gap-1 rounded-lg px-1 ${
-                        linking
-                          ? "ring-2 ring-primary bg-primary-50"
-                          : paired
-                          ? "bg-secondary-50"
-                          : ""
-                      }`}
+                      className={clsx(
+                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5",
+                        linking && "ring-2 ring-primary bg-primary-50",
+                        paired && !linking && "bg-secondary-50"
+                      )}
                     >
-                      <User
-                        primaryColor={paired ? "#7828c8" : "#888"}
-                        size="medium"
-                      />
-                      <span className="text-sm text-gray-500 w-4">
+                      <span className="shrink-0">
+                        <User
+                          primaryColor={paired ? "#7828c8" : "#888"}
+                          size="medium"
+                        />
+                      </span>
+                      <span className="text-sm text-gray-500 w-4 shrink-0 tabular-nums">
                         {index + 1}
                       </span>
-                      <PlayerNameEdit
-                        name={name}
-                        onSave={(newName) => {
-                          const namesById = renameWithDisambiguation(
-                            players.map((p) => ({ id: p.id, name: p.name })),
-                            id,
-                            newName
-                          );
-                          const oldName = name;
-                          const nextPlayers = players.map((p) => ({
-                            ...p,
-                            name: namesById[p.id] ?? p.name,
-                          }));
-                          setFixedPairs(
-                            renameInPairs(fixedPairs, oldName, namesById[id] ?? newName)
-                          );
-                          if (linkingPlayer === oldName) {
-                            setLinkingPlayer(namesById[id] ?? newName);
-                          }
-                          setPlayers(nextPlayers);
-                        }}
-                      />
-                      {paired ? (
-                        <>
+                      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                        <PlayerNameEdit
+                          compact
+                          editTrigger="click"
+                          name={name}
+                          onSave={(newName) => {
+                            const namesById = renameWithDisambiguation(
+                              players.map((p) => ({ id: p.id, name: p.name })),
+                              id,
+                              newName
+                            );
+                            const oldName = name;
+                            const nextPlayers = players.map((p) => ({
+                              ...p,
+                              name: namesById[p.id] ?? p.name,
+                            }));
+                            setFixedPairs(
+                              renameInPairs(
+                                fixedPairs,
+                                oldName,
+                                namesById[id] ?? newName
+                              )
+                            );
+                            if (linkingPlayer === oldName) {
+                              setLinkingPlayer(namesById[id] ?? newName);
+                            }
+                            setPlayers(nextPlayers);
+                          }}
+                        />
+                        {paired ? (
                           <span
-                            className="text-xs text-secondary whitespace-nowrap"
+                            className="inline-flex shrink-0 items-center gap-1 text-sm font-normal text-secondary"
                             title={`Paired with ${partner}`}
                           >
-                            ↔ {partner}
+                            <PairLinkIcon size={14} color="#7828c8" />
+                            {partner}
                           </span>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {paired ? (
                           <Button
                             variant="flat"
                             color="secondary"
+                            size="sm"
                             aria-label={`Unlink ${name} from ${partner}`}
                             isIconOnly
                             onPress={() => handleUnlink(name)}
                           >
-                            <Delete primaryColor="#7828c8" size="small" />
+                            <PairLinkIcon color="#7828c8" size={16} />
                           </Button>
-                        </>
-                      ) : (
+                        ) : (
+                          <Button
+                            variant={linking ? "solid" : "flat"}
+                            color={linking ? "primary" : "default"}
+                            size="sm"
+                            aria-label={
+                              linkingPlayer && linkingPlayer !== name
+                                ? `Pair ${linkingPlayer} with ${name}`
+                                : `Link ${name} as a fixed pair`
+                            }
+                            isIconOnly
+                            onPress={() => handleLinkClick(name)}
+                          >
+                            <PairLinkIcon
+                              color={linking ? "#fff" : "#888"}
+                              size={16}
+                            />
+                          </Button>
+                        )}
                         <Button
-                          variant={linking ? "solid" : "flat"}
-                          color={linking ? "primary" : "default"}
-                          aria-label={
-                            linkingPlayer && linkingPlayer !== name
-                              ? `Pair ${linkingPlayer} with ${name}`
-                              : `Link ${name} as a fixed pair`
-                          }
+                          variant="flat"
+                          color="default"
+                          size="sm"
+                          aria-label={`Remove player named ${name}`}
                           isIconOnly
-                          onPress={() => handleLinkClick(name)}
+                          onPress={() => {
+                            setFixedPairs(removePairForPlayer(fixedPairs, name));
+                            if (linkingPlayer === name) setLinkingPlayer(null);
+                            setPlayers((current) => {
+                              const before = current;
+                              const next = current.filter((p) => p.id !== id);
+                              return applySetupDisambiguation(next, before);
+                            });
+                          }}
                         >
-                          <PairLinkIcon
-                            color={linking ? "#fff" : "#888"}
-                            size={16}
-                          />
+                          <Delete />
                         </Button>
-                      )}
-                      <Button
-                        variant="flat"
-                        color="default"
-                        aria-label={`Remove player named ${name}`}
-                        isIconOnly
-                        onPress={() => {
-                          setFixedPairs(removePairForPlayer(fixedPairs, name));
-                          if (linkingPlayer === name) setLinkingPlayer(null);
-                          setPlayers((current) => {
-                            const before = current;
-                            const next = current.filter((p) => p.id !== id);
-                            return applySetupDisambiguation(next, before);
-                          });
-                        }}
-                      >
-                        <Delete />
-                      </Button>
+                      </div>
                     </div>
                   </Fragment>
                 );
@@ -468,7 +484,7 @@ function NewGame() {
                       size="sm"
                       color="secondary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),
@@ -484,7 +500,7 @@ function NewGame() {
                       size="sm"
                       color="primary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),
@@ -500,7 +516,7 @@ function NewGame() {
                       size="sm"
                       color="secondary"
                       variant="flat"
-                      onClick={() =>
+                      onPress={() =>
                         setCourtNames(
                           Array.from(
                             new Array(Math.max(parseInt(courts) || 0, 0)),

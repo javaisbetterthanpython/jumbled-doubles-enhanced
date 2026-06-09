@@ -140,7 +140,7 @@ export function PlayersModal({
         </ModalHeader>
         <ModalBody>
           <p className="text-lg">
-            Add or remove players, link fixed pairs, or tap the pencil to rename.
+            Add or remove players, link fixed pairs, or tap a name to rename.
             Renames apply immediately. For roster changes, either{" "}
             <span className="font-bold">redo the current round</span> (because
             you haven&apos;t played yet) or{" "}
@@ -210,6 +210,7 @@ export function PlayersModal({
                   {player.delete ? "❌ " : ""}
                   <PlayerNameEdit
                     name={player.name}
+                    editTrigger="click"
                     disabled={false}
                     onSave={(newName) => handleRename(player.id, newName)}
                   />

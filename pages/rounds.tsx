@@ -60,7 +60,7 @@ export default function Rounds() {
     Math.min(roundIndex, Math.max(state.rounds.length - 1, 0))
   );
   const round = state.rounds[displayIndex];
-  const volunteers = state.volunteerSitoutsByRound[displayIndex];
+  const volunteers = state.volunteerSitoutsByRound?.[displayIndex] ?? [];
   const { sitOuts = [], matches = [] } = round || {};
   const isHistoricalRound = displayIndex < state.rounds.length - 1;
 

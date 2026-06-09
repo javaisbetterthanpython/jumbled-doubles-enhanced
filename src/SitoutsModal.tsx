@@ -49,11 +49,13 @@ export function SitoutsModal({
             value={volunteers}
             onValueChange={setVolunteers}
           >
-            {state.players.map((player) => (
-              <Checkbox value={player} key={player}>
-                {state.playersById[player].name}
-              </Checkbox>
-            ))}
+            {state.players
+              .filter((player) => state.playersById[player])
+              .map((player) => (
+                <Checkbox value={player} key={player}>
+                  {state.playersById[player].name}
+                </Checkbox>
+              ))}
           </CheckboxGroup>
         </ModalBody>
         <ModalFooter>
