@@ -1,6 +1,8 @@
 import {
   disambiguateNames,
   getBaseName,
+  getPickleballAdjective,
+  PICKLEBALL_ADJECTIVES,
   renameInNameList,
   renameWithDisambiguation,
 } from "../src/playerNames";
@@ -21,6 +23,12 @@ describe("getBaseName", () => {
   });
 });
 
+describe("PICKLEBALL_ADJECTIVES", () => {
+  it("has at least 30 options for a session", () => {
+    expect(PICKLEBALL_ADJECTIVES.length).toBeGreaterThanOrEqual(30);
+  });
+});
+
 describe("disambiguateNames", () => {
   it("leaves a single player as plain base name", () => {
     const result = disambiguateNames([{ id: "a", name: "Bob" }]);
@@ -37,8 +45,10 @@ describe("disambiguateNames", () => {
       { id: "a", name: "Bob" },
       { id: "b", name: "Bob" },
     ]);
-    expect(result.get("a")).toMatch(/^(Pickle|Dink|Kitchen) Bob$/);
-    expect(result.get("b")).toMatch(/^(Pickle|Dink|Kitchen) Bob$/);
+    const names = [result.get("a")!, result.get("b")!];
+    const adjectives = names.map((n) => getPickleballAdjective(n));
+    expect(adjectives.every(Boolean)).toBe(true);
+    expect(new Set(adjectives).size).toBe(2);
     expect(result.get("a")).not.toBe(result.get("b"));
   });
 
@@ -72,10 +82,24 @@ describe("disambiguateNames", () => {
       { id: "c", name: "Bob" },
     ]);
     const names = [...result.values()];
-    expect(
-      names.every((n) => /^(Pickle|Dink|Kitchen|Paddle|Ernie) Bob$/.test(n))
-    ).toBe(true);
+    const adjectives = names.map((n) => getPickleballAdjective(n));
+    expect(adjectives.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(3);
+    expect(new Set(adjectives).size).toBe(3);
+  });
+
+  it("does not reuse adjectives across different duplicate base names", () => {
+    const result = disambiguateNames([
+      { id: "a", name: "Alex" },
+      { id: "b", name: "Alex" },
+      { id: "c", name: "Andrew" },
+      { id: "d", name: "Andrew" },
+    ]);
+    const adjectives = [...result.values()]
+      .map((n) => getPickleballAdjective(n))
+      .filter(Boolean);
+    expect(adjectives).toHaveLength(4);
+    expect(new Set(adjectives).size).toBe(4);
   });
 });
 
@@ -89,8 +113,11 @@ describe("renameWithDisambiguation", () => {
       "b",
       "Alice"
     );
-    expect(names.a).toMatch(/^(Pickle|Dink|Kitchen) Alice$/);
-    expect(names.b).toMatch(/^(Pickle|Dink|Kitchen) Alice$/);
+    expect(getPickleballAdjective(names.a)).toBeTruthy();
+    expect(getPickleballAdjective(names.b)).toBeTruthy();
+    expect(getPickleballAdjective(names.a)).not.toBe(
+      getPickleballAdjective(names.b)
+    );
     expect(names.a).not.toBe(names.b);
   });
 });
@@ -98,7 +125,10 @@ describe("renameWithDisambiguation", () => {
 describe("renameInNameList", () => {
   it("assigns adjectives when adding a duplicate via rename", () => {
     const result = renameInNameList(["Alice", "Bob"], 1, "Alice");
-    expect(result[0]).toMatch(/^(Pickle|Dink|Kitchen) Alice$/);
-    expect(result[1]).toMatch(/^(Pickle|Dink|Kitchen) Alice$/);
+    expect(getPickleballAdjective(result[0])).toBeTruthy();
+    expect(getPickleballAdjective(result[1])).toBeTruthy();
+    expect(getPickleballAdjective(result[0])).not.toBe(
+      getPickleballAdjective(result[1])
+    );
   });
 });

@@ -8,12 +8,18 @@ export function PlayerNameEdit({
   onSave,
   className,
   disabled = false,
+  compact = false,
+  editTrigger = "icon",
   "aria-label": ariaLabel = "Player name",
 }: {
   name: string;
   onSave: (newName: string) => void;
   className?: string;
   disabled?: boolean;
+  /** When true, name does not grow to fill the row (for setup lists). */
+  compact?: boolean;
+  /** `icon` — pencil on the left; `click` — tap the name to edit (no pencil). */
+  editTrigger?: "icon" | "click";
   "aria-label"?: string;
 }) {
   const [editing, setEditing] = useState(false);
@@ -74,20 +80,64 @@ export function PlayerNameEdit({
     );
   }
 
+  if (editTrigger === "click") {
+    if (disabled) {
+      return (
+        <span
+          className={clsx(
+            "min-w-0 truncate",
+            compact ? "max-w-[9rem] sm:max-w-none" : "flex-1",
+            className
+          )}
+        >
+          {name}
+        </span>
+      );
+    }
+    return (
+      <Button
+        variant="light"
+        aria-label={`Edit name for ${name}`}
+        className={clsx(
+          "h-auto min-h-0 min-w-0 justify-start px-1 font-normal text-inherit",
+          compact ? "max-w-[9rem] sm:max-w-none" : "flex-1",
+          className
+        )}
+        onPress={() => setEditing(true)}
+      >
+        <span className="truncate text-left">{name}</span>
+      </Button>
+    );
+  }
+
   return (
-    <div className={clsx("flex items-center gap-1 flex-1 min-w-0", className)}>
-      <span className="flex-1 min-w-0 truncate">{name}</span>
+    <div
+      className={clsx(
+        "flex items-center gap-1 min-w-0",
+        compact ? "flex-none" : "flex-1",
+        className
+      )}
+    >
       {!disabled ? (
         <Button
           variant="flat"
           size="sm"
           isIconOnly
+          className="shrink-0"
           aria-label={`Edit name for ${name}`}
           onPress={() => setEditing(true)}
         >
           <Edit size="small" />
         </Button>
       ) : null}
+      <span
+        className={clsx(
+          "min-w-0 truncate",
+          compact ? "max-w-[9rem] sm:max-w-none" : "flex-1"
+        )}
+      >
+        {name}
+      </span>
     </div>
   );
 }

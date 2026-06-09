@@ -25,9 +25,13 @@ const grandstander = Grandstander({ subsets: ["latin"] });
 
 export function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    new CircleType(document.getElementById("jumbled"))
-      .radius(200)
-      .forceHeight(false);
+    const el = document.getElementById("jumbled");
+    if (!el) return;
+    try {
+      new CircleType(el).radius(200).forceHeight(false);
+    } catch {
+      // Non-fatal: logo still renders without curved text.
+    }
   }, []);
   const router = useRouter();
   useLoadState();
