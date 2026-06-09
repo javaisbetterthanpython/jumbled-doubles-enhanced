@@ -7,12 +7,16 @@ export type MatchIdentifier = string;
 export type MatchCounts = { [key: MatchIdentifier]: number };
 export type PartnerPairIdentifier = string;
 export type PartnerPairCounts = { [key: PartnerPairIdentifier]: number };
+export type OpponentPairIdentifier = string;
+export type OpponentPairCounts = { [key: OpponentPairIdentifier]: number };
 export type Match = [Team, Team];
 export type Round = {
   matches: Array<Match>;
   sitOuts: Array<PlayerId>;
   /** Display names frozen when this round was generated. */
   playerNamesById?: Record<PlayerId, string>;
+  /** Shown when session-wide no-repeat could not be fully satisfied. */
+  repeatNote?: string;
 };
 export type Player = {
   name: string;
@@ -40,9 +44,15 @@ export const INFINITY = 9999;
 /** Penalty subtracted when two players were partners or opponents in the previous round. */
 export const BACK_TO_BACK_MATCHUP_PENALTY = 5000;
 
+/** Penalty when a partner/opponent pairing repeats for the 2nd time in a session. */
+export const SESSION_REPEAT_PENALTY_2ND = 100_000;
+
+/** Base penalty for each repeat beyond the 2nd in a session (scaled by excess count). */
+export const SESSION_REPEAT_PENALTY_3RD_PLUS = 1_000_000;
+
 const GENERATIONS = 4;
 const ROUND_LOOKAHEAD = 3;
-const ROUND_ATTEMPTS = 30;
+const ROUND_ATTEMPTS = 60;
 
 /**
  * Populate default player scores for each person.
@@ -123,6 +133,19 @@ const getDefaultHeuristics = (
   };
 };
 
+const isFixedPartnership = (
+  a: PlayerId,
+  b: PlayerId,
+  fixedPairs: Team[]
+): boolean =>
+  fixedPairs.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
+
+export const getSessionRepeatPenalty = (priorCount: number): number => {
+  if (priorCount <= 0) return 0;
+  if (priorCount === 1) return SESSION_REPEAT_PENALTY_2ND;
+  return SESSION_REPEAT_PENALTY_3RD_PLUS * (priorCount - 1);
+};
+
 /**
  * How much do I want a particular partner?
  *
@@ -131,9 +154,9 @@ const getDefaultHeuristics = (
 const getPartnerScore = (
   player: PlayerId,
   heuristics: PlayerHeuristicsDictionary,
-  partner: PlayerId
+  partner: PlayerId,
+  fixedPairs: Team[] = []
 ) => {
-  const {} = heuristics[player].roundsSincePlayedAgainst;
   const { min: minSinceWith, [partner]: roundsSinceWith } =
     heuristics[player].roundsSincePlayedWith;
   const { min: minPlayedCount, [partner]: playedWithCount } =
@@ -149,7 +172,12 @@ const getPartnerScore = (
   const backToBackPenalty =
     roundsSinceWith === 1 ? BACK_TO_BACK_MATCHUP_PENALTY : 0;
 
-  return playedWithScore - backToBackPenalty;
+  const priorPartnerCount = heuristics[player].playedWithCount[partner] ?? 0;
+  const sessionRepeatPenalty = isFixedPartnership(player, partner, fixedPairs)
+    ? 0
+    : getSessionRepeatPenalty(priorPartnerCount);
+
+  return playedWithScore - backToBackPenalty - sessionRepeatPenalty;
 };
 
 const getMatchIdentifier = (match: Match): MatchIdentifier => {
@@ -161,6 +189,31 @@ const getMatchIdentifier = (match: Match): MatchIdentifier => {
 
 const getPartnerPairIdentifier = (team: Team): PartnerPairIdentifier =>
   team.slice().sort().join(" ");
+
+const getOpponentPairIdentifier = (
+  a: PlayerId,
+  b: PlayerId
+): OpponentPairIdentifier => [a, b].sort().join(" ");
+
+const getOpponentPairCounts = (
+  rounds: Round[],
+  previousCounts?: OpponentPairCounts
+): OpponentPairCounts => {
+  const result: OpponentPairCounts = previousCounts
+    ? JSON.parse(JSON.stringify(previousCounts))
+    : {};
+  rounds.forEach((round) => {
+    round.matches.forEach(([teamA, teamB]) => {
+      teamA.forEach((playerA) => {
+        teamB.forEach((playerB) => {
+          const pairId = getOpponentPairIdentifier(playerA, playerB);
+          result[pairId] = (result[pairId] || 0) + 1;
+        });
+      });
+    });
+  });
+  return result;
+};
 
 const getPartnerPairCounts = (
   rounds: Round[],
@@ -241,8 +294,13 @@ const getOpponentScore = (
         roundsSinceAgainst - minSinceAgainst,
         roundsSinceWith - minSinceWith
       );
+    const priorOpponentCount = heuristics[player].playedAgainstCount[target] ?? 0;
+    const sessionRepeatPenalty = getSessionRepeatPenalty(priorOpponentCount);
     // Square result to strongly favor high numbers.
-    return Math.pow(netRoundsSinceSeen, 2) * frequencyReductionMultiplier;
+    return (
+      Math.pow(netRoundsSinceSeen, 2) * frequencyReductionMultiplier -
+      sessionRepeatPenalty
+    );
   };
 
   // Strongly discourage repeated matchups (remove duplicates where teams and players are the same).
@@ -427,12 +485,13 @@ const getHeuristics = (
  */
 export const getPartnerPreferences = (
   players: PlayerId[],
-  heuristics: PlayerHeuristicsDictionary
+  heuristics: PlayerHeuristicsDictionary,
+  fixedPairs: Team[] = []
 ) => {
   return players.reduce((result: Preferences, player) => {
     result[player] = players.reduce((acc: Record<string, number>, partner) => {
       if (player === partner) return acc;
-      acc[partner] = getPartnerScore(player, heuristics, partner);
+      acc[partner] = getPartnerScore(player, heuristics, partner, fixedPairs);
       return acc;
     }, {});
     return result;
@@ -797,6 +856,7 @@ async function getNextRound(
 ): Promise<[Round, { bestTeamScore: number; bestMatchesScore: number }]> {
   const [uniqueMatchCounts] = getUniqueMatchCounts(rounds);
   const partnerPairCounts = getPartnerPairCounts(rounds);
+  const opponentPairCounts = getOpponentPairCounts(rounds);
 
   let bestTeamScore = Infinity;
   let bestTeams: { teams: Team[]; sitOuts: PlayerId[] } = {
@@ -840,7 +900,8 @@ async function getNextRound(
     if (unpairedPlayers.length >= 2) {
       const partnerPreferences: Preferences = getPartnerPreferences(
         unpairedPlayers,
-        heuristics
+        heuristics,
+        fixedPairs
       );
       const partnerMaker = new PairMaker(partnerPreferences);
       partnerMaker.solve();
@@ -869,9 +930,11 @@ async function getNextRound(
         bPlayedWith[a] === bPlayedWith.max && bPlayedWith[a] !== bPlayedWith.min
           ? 1
           : 0;
-      const repeatedPartnerCount =
-        partnerPairCounts[getPartnerPairIdentifier([a, b])] || 0;
-      const partnerPairPenalty = Math.pow(repeatedPartnerCount, 2);
+      const pairId = getPartnerPairIdentifier([a, b]);
+      const repeatedPartnerCount = partnerPairCounts[pairId] || 0;
+      const partnerPairPenalty = isFixedPartnership(a, b, fixedPairs)
+        ? 0
+        : getSessionRepeatPenalty(repeatedPartnerCount);
       return result + aScore + bScore + partnerPairPenalty;
     }, 0);
 
@@ -911,18 +974,30 @@ async function getNextRound(
       [{ matches, sitOuts: bestTeams.sitOuts }],
       uniqueMatchCounts
     );
+    let opponentRepeatPenalty = 0;
+    matches.forEach(([teamA, teamB]) => {
+      teamA.forEach((playerA) => {
+        teamB.forEach((playerB) => {
+          const priorCount =
+            opponentPairCounts[getOpponentPairIdentifier(playerA, playerB)] || 0;
+          opponentRepeatPenalty += getSessionRepeatPenalty(priorCount);
+        });
+      });
+    });
+
     const averageScore =
       Math.pow(newDuplicates + 1, 2) *
-      players.reduce((score, player) => {
-        const { roundsSincePlayedAgainst } = newHeuristics[player];
-        const playerScore = Math.sqrt(
-          players.reduce((sum, opponent) => {
-            if (opponent === player) return sum;
-            return sum + Math.pow(roundsSincePlayedAgainst[opponent], 2);
-          }, 0)
-        );
-        return score + playerScore / players.length;
-      }, 0);
+        players.reduce((score, player) => {
+          const { roundsSincePlayedAgainst } = newHeuristics[player];
+          const playerScore = Math.sqrt(
+            players.reduce((sum, opponent) => {
+              if (opponent === player) return sum;
+              return sum + Math.pow(roundsSincePlayedAgainst[opponent], 2);
+            }, 0)
+          );
+          return score + playerScore / players.length;
+        }, 0) +
+      opponentRepeatPenalty;
 
     const backToBackOpponents = countBackToBackOpponentRepeats(
       { matches, sitOuts: bestTeams.sitOuts },
@@ -952,6 +1027,90 @@ async function getNextRound(
     { bestTeamScore, bestMatchesScore },
   ];
 }
+
+const countSessionRepeatsInRound = (
+  round: Round,
+  priorRounds: Round[],
+  fixedPairs: Team[] = []
+): { partnerRepeats: number; opponentRepeats: number } => {
+  const partnerPairCounts = getPartnerPairCounts(priorRounds);
+  const opponentPairCounts = getOpponentPairCounts(priorRounds);
+  let partnerRepeats = 0;
+  let opponentRepeats = 0;
+
+  round.matches.forEach((match) => {
+    match.forEach((team) => {
+      const pairId = getPartnerPairIdentifier(team);
+      if (
+        (partnerPairCounts[pairId] || 0) > 0 &&
+        !isFixedPartnership(team[0], team[1], fixedPairs)
+      ) {
+        partnerRepeats += 1;
+      }
+    });
+    const [teamA, teamB] = match;
+    teamA.forEach((playerA) => {
+      teamB.forEach((playerB) => {
+        if (
+          (opponentPairCounts[getOpponentPairIdentifier(playerA, playerB)] ||
+            0) > 0
+        ) {
+          opponentRepeats += 1;
+        }
+      });
+    });
+  });
+
+  return { partnerRepeats, opponentRepeats };
+};
+
+export const getMaxSessionPairingCount = (
+  round: Round,
+  priorRounds: Round[],
+  fixedPairs: Team[] = []
+): number => {
+  const partnerPairCounts = getPartnerPairCounts(priorRounds);
+  const opponentPairCounts = getOpponentPairCounts(priorRounds);
+  let maxCount = 0;
+
+  round.matches.forEach((match) => {
+    match.forEach((team) => {
+      if (!isFixedPartnership(team[0], team[1], fixedPairs)) {
+        const pairId = getPartnerPairIdentifier(team);
+        maxCount = Math.max(maxCount, (partnerPairCounts[pairId] || 0) + 1);
+      }
+    });
+    const [teamA, teamB] = match;
+    teamA.forEach((playerA) => {
+      teamB.forEach((playerB) => {
+        const pairId = getOpponentPairIdentifier(playerA, playerB);
+        maxCount = Math.max(maxCount, (opponentPairCounts[pairId] || 0) + 1);
+      });
+    });
+  });
+
+  return maxCount;
+};
+
+export const analyzeSessionRepeats = (
+  round: Round,
+  priorRounds: Round[],
+  fixedPairs: Team[] = []
+): { hasRepeats: boolean; repeatNote?: string } => {
+  const { partnerRepeats, opponentRepeats } = countSessionRepeatsInRound(
+    round,
+    priorRounds,
+    fixedPairs
+  );
+  if (partnerRepeats === 0 && opponentRepeats === 0) {
+    return { hasRepeats: false };
+  }
+  return {
+    hasRepeats: true,
+    repeatNote:
+      "Some players are meeting again this round — unavoidable with this group size, fixed pairs, or late joiners.",
+  };
+};
 
 const countBackToBackOpponentRepeats = (
   round: Round,
@@ -983,12 +1142,16 @@ async function getNextBestRound(
   const [matchCounts] = getUniqueMatchCounts(rounds);
   let bestRoundScore: {
     backToBackOpponents: number;
+    sessionRepeats: number;
+    maxPairingCount: number;
     opponentScore: number;
     partnerScore: number;
     duplicates: number;
     variance: number;
   } = {
     backToBackOpponents: Infinity,
+    sessionRepeats: Infinity,
+    maxPairingCount: Infinity,
     opponentScore: Infinity,
     partnerScore: Infinity,
     duplicates: Infinity,
@@ -1000,6 +1163,8 @@ async function getNextBestRound(
     let newHeuristics = heuristics;
     let newRounds: Round[] = [];
     let backToBackOpponents = Infinity;
+    let sessionRepeats = Infinity;
+    let maxPairingCount = Infinity;
     let partnerScore = 0;
     let opponentScore = Infinity;
     let duplicates = 0;
@@ -1036,6 +1201,17 @@ async function getNextBestRound(
             candidateRound,
             heuristics
           );
+          const repeats = countSessionRepeatsInRound(
+            candidateRound,
+            rounds,
+            fixedPairs
+          );
+          sessionRepeats = repeats.partnerRepeats + repeats.opponentRepeats;
+          maxPairingCount = getMaxSessionPairingCount(
+            candidateRound,
+            rounds,
+            fixedPairs
+          );
         }
         // We care more about the short term team score and duplicates.
         partnerScore +=
@@ -1054,12 +1230,16 @@ async function getNextBestRound(
     );
     variance = getVariance(partnerCountValues);
 
+    if (bestRoundScore.sessionRepeats < sessionRepeats) continue;
+    if (bestRoundScore.maxPairingCount < maxPairingCount) continue;
     if (bestRoundScore.backToBackOpponents < backToBackOpponents) continue;
     if (bestRoundScore.duplicates < duplicates) continue;
     if (bestRoundScore.partnerScore < partnerScore) continue;
     if (bestRoundScore.opponentScore < opponentScore) continue;
     // Variance fairness is the final tiebreaker after matchup quality.
     if (
+      sessionRepeats < bestRoundScore.sessionRepeats ||
+      maxPairingCount < bestRoundScore.maxPairingCount ||
       backToBackOpponents < bestRoundScore.backToBackOpponents ||
       duplicates < bestRoundScore.duplicates ||
       partnerScore < bestRoundScore.partnerScore ||
@@ -1068,6 +1248,8 @@ async function getNextBestRound(
     ) {
       bestRoundScore = {
         backToBackOpponents,
+        sessionRepeats,
+        maxPairingCount,
         partnerScore,
         opponentScore,
         duplicates,
@@ -1086,15 +1268,26 @@ async function getNextBestRound(
       heuristics,
       fixedPairs
     );
-    return fallbackRound;
+    return attachRepeatNote(fallbackRound, rounds, fixedPairs);
   }
-  return selectedRound;
+  return attachRepeatNote(selectedRound, rounds, fixedPairs);
 }
+
+const attachRepeatNote = (
+  round: Round,
+  priorRounds: Round[],
+  fixedPairs: Team[]
+): Round => {
+  const { repeatNote } = analyzeSessionRepeats(round, priorRounds, fixedPairs);
+  return repeatNote ? { ...round, repeatNote } : round;
+};
 
 export {
   getHeuristics,
   getNextRound,
   getNextBestRound,
+  getOpponentPairCounts,
+  getOpponentPairIdentifier,
   getOpponentScore as opponentScore,
   getPartnerPairCounts,
   getPartnerPairIdentifier,

@@ -107,6 +107,135 @@ const ShufflerWorkerContext = React.createContext<Worker | null | undefined>(
   undefined
 );
 
+type PregenCache = {
+  key: string | null;
+  round: Round | null;
+  promise: Promise<Round> | null;
+  volunteerSitouts: PlayerId[];
+  generationId: number;
+};
+
+const emptyPregenCache = (): PregenCache => ({
+  key: null,
+  round: null,
+  promise: null,
+  volunteerSitouts: [],
+  generationId: 0,
+});
+
+const ShufflerPregenContext = React.createContext<
+  React.MutableRefObject<PregenCache> | undefined
+>(undefined);
+
+function buildPregenKey(
+  rounds: Round[],
+  players: PlayerId[],
+  courts: number,
+  fixedPairs: Team[]
+): string {
+  return JSON.stringify({
+    players,
+    courts,
+    fixedPairs,
+    rounds: rounds.map(({ matches, sitOuts }) => ({ matches, sitOuts })),
+  });
+}
+
+const sitoutsEqual = (a: PlayerId[], b: PlayerId[]): boolean =>
+  a.length === b.length && a.every((id, index) => id === b[index]);
+
+function invalidatePregen(
+  pregen: React.MutableRefObject<PregenCache>
+): void {
+  pregen.current.generationId += 1;
+  pregen.current.key = null;
+  pregen.current.round = null;
+  pregen.current.promise = null;
+  pregen.current.volunteerSitouts = [];
+}
+
+function startPregenerate(
+  pregen: React.MutableRefObject<PregenCache>,
+  worker: Worker,
+  rounds: Round[],
+  players: PlayerId[],
+  courts: number,
+  fixedPairs: Team[],
+  volunteerSitouts: PlayerId[] = []
+): void {
+  const key = buildPregenKey(rounds, players, courts, fixedPairs);
+  const genId = pregen.current.generationId;
+
+  if (
+    pregen.current.key === key &&
+    sitoutsEqual(pregen.current.volunteerSitouts, volunteerSitouts) &&
+    (pregen.current.round !== null || pregen.current.promise !== null)
+  ) {
+    return;
+  }
+
+  pregen.current.key = key;
+  pregen.current.volunteerSitouts = [...volunteerSitouts];
+  pregen.current.round = null;
+
+  pregen.current.promise = generateRound(
+    worker,
+    rounds,
+    players,
+    courts,
+    volunteerSitouts,
+    fixedPairs
+  ).then((round) => {
+    if (
+      genId === pregen.current.generationId &&
+      pregen.current.key === key
+    ) {
+      pregen.current.round = round;
+    }
+    return round;
+  });
+}
+
+async function consumePregen(
+  pregen: React.MutableRefObject<PregenCache>,
+  rounds: Round[],
+  players: PlayerId[],
+  courts: number,
+  fixedPairs: Team[],
+  volunteerSitouts: PlayerId[]
+): Promise<Round | null> {
+  const key = buildPregenKey(rounds, players, courts, fixedPairs);
+  if (
+    pregen.current.key !== key ||
+    !sitoutsEqual(pregen.current.volunteerSitouts, volunteerSitouts)
+  ) {
+    return null;
+  }
+
+  if (pregen.current.round) {
+    const round = pregen.current.round;
+    invalidatePregen(pregen);
+    return round;
+  }
+
+  if (pregen.current.promise) {
+    try {
+      const round = await pregen.current.promise;
+      if (
+        pregen.current.key === key &&
+        sitoutsEqual(pregen.current.volunteerSitouts, volunteerSitouts)
+      ) {
+        invalidatePregen(pregen);
+        return round;
+      }
+    } catch {
+      invalidatePregen(pregen);
+    }
+  }
+
+  return null;
+}
+
 function createPlayers(names: string[]) {
   return names.map((name) => {
     return { name, id: uuidv4() };
@@ -307,21 +436,47 @@ async function newRound(
   dispatch: Dispatch,
   state: State,
   worker: Worker | null,
-  payload: NewRoundOptions
+  payload: NewRoundOptions,
+  pregen: React.MutableRefObject<PregenCache>
 ) {
   if (!worker) return;
   if (state.generating) return;
-  dispatch({ type: "start-generation", payload });
   const rounds = payload.regenerate ? state.rounds.slice(0, -1) : state.rounds;
+  const players = payload.players ?? state.players;
+  const fixedPairs = payload.fixedPairs ?? state.fixedPairs;
+
+  const precomputed = await consumePregen(
+    pregen,
+    rounds,
+    players,
+    state.courts,
+    fixedPairs,
+    payload.volunteerSitouts
+  );
+  if (precomputed?.matches) {
+    dispatch({ type: "start-generation", payload });
+    dispatch({
+      type: "new-round",
+      payload: {
+        round: precomputed,
+        volunteerSitouts: payload.volunteerSitouts,
+        regenerate: payload.regenerate ?? false,
+      },
+    });
+    return;
+  }
+
+  invalidatePregen(pregen);
+  dispatch({ type: "start-generation", payload });
 
   try {
     const nextRound = await generateRound(
       worker,
       rounds,
-      state.players,
+      players,
       state.courts,
       payload.volunteerSitouts,
-      state.fixedPairs
+      fixedPairs
     );
     if (!nextRound?.matches) {
       throw new Error("Round generation returned an empty round");
@@ -343,10 +498,12 @@ async function newGame(
   dispatch: Dispatch,
   state: State,
   worker: Worker | null,
-  payload: NewGameOptions
+  payload: NewGameOptions,
+  pregen: React.MutableRefObject<PregenCache>
 ) {
   if (!worker) return;
   if (state.generating) return;
+  invalidatePregen(pregen);
   const { courts, names, courtNames, fixedPairs: namePairs = [] } = payload;
   const players = createPlayers(names).sort((a, b) =>
     a.name.localeCompare(b.name)
@@ -411,7 +568,8 @@ async function editCourts(
   dispatch: Dispatch,
   state: State,
   worker: Worker | null,
-  payload: EditCourts
+  payload: EditCourts,
+  pregen: React.MutableRefObject<PregenCache>
 ) {
   if (!worker) return;
   if (state.generating) return;
@@ -420,6 +578,33 @@ async function editCourts(
     ? state.volunteerSitoutsByRound.slice(-1)[0]
     : [];
   const rounds = regenerate ? state.rounds.slice(0, -1) : state.rounds;
+
+  const precomputed = await consumePregen(
+    pregen,
+    rounds,
+    state.players,
+    courts,
+    state.fixedPairs,
+    volunteerSitouts
+  );
+  if (precomputed?.matches) {
+    dispatch({
+      type: "start-generation",
+      payload: { volunteerSitouts, regenerate },
+    });
+    dispatch({
+      type: "new-round",
+      payload: {
+        round: precomputed,
+        volunteerSitouts,
+        courts,
+        regenerate,
+      },
+    });
+    return;
+  }
+
+  invalidatePregen(pregen);
   dispatch({
     type: "start-generation",
     payload: { volunteerSitouts, regenerate },
@@ -470,7 +655,8 @@ async function editPlayers(
   dispatch: Dispatch,
   state: State,
   worker: Worker | null,
-  payload: EditPlayers
+  payload: EditPlayers,
+  pregen: React.MutableRefObject<PregenCache>
 ) {
   if (!worker) return;
   if (state.generating) return;
@@ -484,6 +670,37 @@ async function editPlayers(
   const playersById = getPlayersById(state.playersById, newPlayers);
   const sanitizedPairs = sanitizeFixedPairs(fixedPairs, playerIds);
 
+  const precomputed = await consumePregen(
+    pregen,
+    rounds,
+    playerIds,
+    state.courts,
+    sanitizedPairs,
+    volunteerSitouts
+  );
+  if (precomputed?.matches) {
+    dispatch({
+      type: "start-generation",
+      payload: {
+        volunteerSitouts,
+        regenerate,
+        playersById,
+        players: playerIds,
+        fixedPairs: sanitizedPairs,
+      },
+    });
+    dispatch({
+      type: "new-round",
+      payload: {
+        round: precomputed,
+        volunteerSitouts,
+        regenerate,
+      },
+    });
+    return;
+  }
+
+  invalidatePregen(pregen);
   dispatch({
     type: "start-generation",
     payload: {
@@ -516,26 +733,68 @@ async function editPlayers(
   }
 }
 
+function useShufflerPregen(): React.MutableRefObject<PregenCache> {
+  const pregen = React.useContext(ShufflerPregenContext);
+  if (pregen === undefined) {
+    throw new Error("useShufflerPregen must be used within a ShufflerProvider");
+  }
+  return pregen;
+}
+
+function usePregenerateNextRound(): void {
+  const pregen = useShufflerPregen();
+  const state = useShufflerState();
+  const worker = useShufflerWorker();
+
+  React.useEffect(() => {
+    if (!worker || state.generating || !state.cacheLoaded) return;
+    if (!state.rounds.length) return;
+
+    startPregenerate(
+      pregen,
+      worker,
+      state.rounds,
+      state.players,
+      state.courts,
+      state.fixedPairs,
+      []
+    );
+  }, [
+    pregen,
+    worker,
+    state.generating,
+    state.cacheLoaded,
+    state.players,
+    state.courts,
+    state.fixedPairs,
+    state.rounds,
+  ]);
+}
+
 function ShufflerProvider({ children }: ShufflerProviderProps) {
   const [state, dispatch] = React.useReducer(shufflerReducer, defaultState);
   const [worker, setWorker] = React.useState<Worker | null>(null);
+  const pregenRef = React.useRef<PregenCache>(emptyPregenCache());
 
   React.useEffect(() => {
     const worker = new Worker(new URL("./matching/worker.ts", import.meta.url));
     setWorker(worker);
     return () => {
       worker.terminate();
+      invalidatePregen(pregenRef);
       setWorker(null);
     };
   }, []);
   return (
-    <ShufflerStateContext.Provider value={state}>
-      <ShufflerDispatchContext.Provider value={dispatch}>
-        <ShufflerWorkerContext.Provider value={worker ?? null}>
-          {children}
-        </ShufflerWorkerContext.Provider>
-      </ShufflerDispatchContext.Provider>
-    </ShufflerStateContext.Provider>
+    <ShufflerPregenContext.Provider value={pregenRef}>
+      <ShufflerStateContext.Provider value={state}>
+        <ShufflerDispatchContext.Provider value={dispatch}>
+          <ShufflerWorkerContext.Provider value={worker ?? null}>
+            {children}
+          </ShufflerWorkerContext.Provider>
+        </ShufflerDispatchContext.Provider>
+      </ShufflerStateContext.Provider>
+    </ShufflerPregenContext.Provider>
   );
 }
 
@@ -586,10 +845,15 @@ export {
   useShufflerState,
   useShufflerDispatch,
   useShufflerWorker,
+  useShufflerPregen,
+  usePregenerateNextRound,
   useLoadState,
   newRound,
   newGame,
   editCourts,
   editPlayers,
   renamePlayer,
+  invalidatePregen,
+  consumePregen,
+  startPregenerate,
 };

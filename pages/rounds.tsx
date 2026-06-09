@@ -21,7 +21,9 @@ import {
   editCourts,
   editPlayers,
   newRound,
+  usePregenerateNextRound,
   useShufflerDispatch,
+  useShufflerPregen,
   useShufflerState,
   useShufflerWorker,
 } from "../src/useShuffler";
@@ -30,6 +32,8 @@ export default function Rounds() {
   const state = useShufflerState();
   const dispatch = useShufflerDispatch();
   const worker = useShufflerWorker();
+  const pregen = useShufflerPregen();
+  usePregenerateNextRound();
 
   const [sitoutModal, setSitoutModal] = useState(false);
   const [playersModal, setPlayersModal] = useState(false);
@@ -109,7 +113,7 @@ export default function Rounds() {
             await newRound(dispatch, state, worker, {
               regenerate: true,
               volunteerSitouts,
-            });
+            }, pregen);
             setSitoutModal(false);
           }}
         />
@@ -121,7 +125,7 @@ export default function Rounds() {
               newPlayers,
               fixedPairs,
               regenerate,
-            });
+            }, pregen);
             setPlayersModal(false);
           }}
         />
@@ -132,7 +136,7 @@ export default function Rounds() {
             await editCourts(dispatch, state, worker, {
               regenerate,
               courts,
-            });
+            }, pregen);
             setCourtsModal(false);
           }}
         />
@@ -176,6 +180,11 @@ export default function Rounds() {
 
         {state.generating && !round ? (
           <p className="text-center text-lg my-8">Jumbling the next round…</p>
+        ) : null}
+        {round?.repeatNote ? (
+          <p className="text-sm text-neutral-500 text-center mb-4">
+            {round.repeatNote}
+          </p>
         ) : null}
         <div className="flex gap-4 items-stretch justify-center flex-wrap">
           {/* Sitting out */}{" "}
@@ -278,7 +287,7 @@ export default function Rounds() {
             onPress={async () => {
               await newRound(dispatch, state, worker, {
                 volunteerSitouts: [],
-              });
+              }, pregen);
             }}
             className="bg-gradient-to-l from-blue-600 to-pink-600 text-white"
           >

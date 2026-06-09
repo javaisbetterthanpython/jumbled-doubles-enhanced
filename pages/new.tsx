@@ -15,6 +15,7 @@ import { PairLinkIcon } from "../src/PlayerBadge";
 import {
   newGame,
   useShufflerDispatch,
+  useShufflerPregen,
   useShufflerState,
   useShufflerWorker,
 } from "../src/useShuffler";
@@ -70,6 +71,7 @@ function renameInPairs(
 function NewGame() {
   const router = useRouter();
   const state = useShufflerState();
+  const pregen = useShufflerPregen();
   const { playersById } = state;
   const dispatch = useShufflerDispatch();
   const worker = useShufflerWorker();
@@ -173,7 +175,7 @@ function NewGame() {
       courts: courtCount,
       courtNames: customizeCourtNames ? courtNames : [],
       fixedPairs,
-    });
+    }, pregen);
     router.push("/rounds");
   };
 
